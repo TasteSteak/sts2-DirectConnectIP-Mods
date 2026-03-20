@@ -1,6 +1,8 @@
 ﻿using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading.Tasks;
 using HarmonyLib;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.Multiplayer;
@@ -172,34 +174,40 @@ public static class OfflinePlayerTakeoverPatches
             var currentRelicsField = AccessTools.Field(typeof(TreasureRoomRelicSynchronizer), "_currentRelics");
 
             var playerCollection = playerCollectionField?.GetValue(__instance) as IPlayerCollection;
-            var votes = votesField?.GetValue(__instance) as List<int?>;
-            var currentRelics = currentRelicsField?.GetValue(__instance) as System.Collections.IEnumerable; 
+            var votesList = votesField?.GetValue(__instance) as IList;
+            var currentRelics = currentRelicsField?.GetValue(__instance) as IEnumerable; 
 
-            if (playerCollection == null || votes == null || currentRelics == null) return;
+            if (playerCollection == null || votesList == null || currentRelics == null) return;
 
             if (playerCollection.Players.All(p => onlineIds.Contains(p.NetId))) return;
 
             var relicCount = currentRelics.Cast<object>().Count();
             if (relicCount == 0) return;
 
-            if (playerCollection.Players.Where((t, i) => onlineIds.Contains(t.NetId) && !votes[i].HasValue).Any())
-            {
-                return;
-            }
-
             var usedIndices = new HashSet<int>();
+            
             for (var i = 0; i < playerCollection.Players.Count; i++)
             {
-                if (onlineIds.Contains(playerCollection.Players[i].NetId) && votes[i].HasValue)
+                if (i >= votesList.Count) break;
+                
+                var pId = playerCollection.Players[i].NetId;
+                if (!onlineIds.Contains(pId)) continue;
+                if (!HasVoted(votesList[i], out var vIndex))
                 {
-                    usedIndices.Add(votes[i].Value);
+                    return;
+                }
+                if (vIndex.HasValue)
+                {
+                    usedIndices.Add(vIndex.Value);
                 }
             }
 
             for (var i = 0; i < playerCollection.Players.Count; i++)
             {
+                if (i >= votesList.Count) break;
+
                 var ghostPlayer = playerCollection.Players[i];
-                if (onlineIds.Contains(ghostPlayer.NetId) || votes[i].HasValue) continue;
+                if (onlineIds.Contains(ghostPlayer.NetId) || HasVoted(votesList[i], out _)) continue;
 
                 var pickIndex = 0;
                 for (var j = 0; j < relicCount; j++)
@@ -209,8 +217,53 @@ public static class OfflinePlayerTakeoverPatches
                     usedIndices.Add(j);
                     break;
                 }
-                var pickAction = new PickRelicAction(ghostPlayer, pickIndex);
-                EnqueueGhostAction(pickAction, ghostPlayer.NetId);
+    
+                GameAction pickAction;
+                try 
+                {
+                    pickAction = (GameAction)Activator.CreateInstance(typeof(PickRelicAction), ghostPlayer, (int?)pickIndex);
+                }
+                catch
+                {
+                    pickAction = (GameAction)Activator.CreateInstance(typeof(PickRelicAction), ghostPlayer, pickIndex);
+                }
+
+                if (pickAction != null)
+                {
+                    EnqueueGhostAction(pickAction, ghostPlayer.NetId);
+                }
+                else
+                {
+                    Log.Error($"[DirectConnectIP] 无法实例化 PickRelicAction，代管拿遗物失败！");
+                }
+            }
+
+            return;
+
+            bool HasVoted(object voteObj, out int? votedIndex)
+            {
+                votedIndex = null;
+                if (voteObj == null) return false;
+
+                var type = voteObj.GetType();
+
+                var voteReceivedField = AccessTools.Field(type, "voteReceived");
+                if (voteReceivedField != null)
+                {
+                    var indexField = AccessTools.Field(type, "index");
+                    var received = (bool)voteReceivedField.GetValue(voteObj)!;
+                    votedIndex = indexField?.GetValue(voteObj) as int?;
+                    return received;
+                }
+
+                // 旧版逻辑：已投票的值会装箱为 int
+                if (type == typeof(int))
+                {
+                    votedIndex = (int)voteObj;
+                    return true;
+                }
+
+                return false;
             }
         }
     }
