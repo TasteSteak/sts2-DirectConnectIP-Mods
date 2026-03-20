@@ -2,7 +2,7 @@
 
 # Slay the Spire 2 Direct IP Multiplayer
 
-[**中文**](README.md) | [**Changelog**](Changelog.md)
+[**中文**](README_CN.md) | [**Changelog**](Changelog.md)
 
 ![Version](https://img.shields.io/badge/Version-1.1.4-blue.svg)
 ![Game](https://img.shields.io/badge/Slay_The_Spire_2-Mod-red.svg)
