@@ -1,0 +1,44 @@
+<Project Sdk="Godot.NET.Sdk/4.5.1">
+    <PropertyGroup>
+        <TargetFramework>net9.0</TargetFramework>
+        <TargetFramework Condition=" '$(GodotTargetPlatform)' == 'android' ">net9.0</TargetFramework>
+        <EnableDynamicLoading>true</EnableDynamicLoading>
+        <NuGetAudit>false</NuGetAudit>
+    </PropertyGroup>
+
+    <ItemGroup>
+        <Reference Include="sts2">
+            <HintPath>lib\sts2.dll</HintPath>
+            <Private>False</Private>
+        </Reference>
+
+        <Reference Include="0Harmony">
+            <HintPath>lib\0Harmony.dll</HintPath>
+            <Private>False</Private>
+        </Reference>
+
+        <Reference Include="Steamworks.NET">
+            <HintPath>lib\Steamworks.NET.dll</HintPath>
+            <Private>False</Private>
+        </Reference>
+    </ItemGroup>
+
+    <ItemGroup>
+      <Content Include="Changelog.md" />
+      <Content Include="LICENSE" />
+      <Content Include="README.md" />
+      <Content Include="README_CN.md" />
+    </ItemGroup>
+
+    <ItemGroup>
+      <Folder Include="img\" />
+    </ItemGroup>
+
+    <Target Name="CopyToBuildFolder" AfterTargets="Build">
+        <MakeDir Directories="$(ProjectDir)build" />
+
+        <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(ProjectDir)build" />
+
+        <Message Text="已额外生成到build文件夹中" Importance="high" />
+    </Target>
+</Project>
