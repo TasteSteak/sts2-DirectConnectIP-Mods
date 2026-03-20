@@ -1,6 +1,6 @@
 ﻿<div align="center">
 
-# Slay the Spire 2 Direct IP Multiplayer
+# Slay the Spire 2 DirectConnectIP
 
 [**中文**](README_CN.md) | [**Changelog**](Changelog.md)
 
