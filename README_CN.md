@@ -1,6 +1,6 @@
 ﻿<div align="center">
 
-# 杀戮尖塔2 IP直连联机 (Direct IP Multiplayer)
+# 杀戮尖塔2 IP直连联机 (DirectConnectIP)
 
 [**English**](README.md) | [**更新日志**](Changelog.md)
 
