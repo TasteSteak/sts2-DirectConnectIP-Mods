@@ -1,0 +1,29 @@
+# Godot 特定忽略文件
+.godot/
+.import/
+.build/
+.tools/
+export.cfg
+export_presets.cfg
+
+# 导入的资源缓存
+*.translation
+*.import
+*.uid
+
+# 编译输出和构建目录 (如果你有 C# 或 Java 代码)
+.mono/
+target/
+bin/
+obj/
+out/
+
+# IDE 配置文件
+.idea/
+.vscode/
+*.sln
+*.csproj.user
+
+# 系统级缓存
+.DS_Store
+Thumbs.db
