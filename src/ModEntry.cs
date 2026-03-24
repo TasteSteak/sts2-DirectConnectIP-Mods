@@ -12,7 +12,7 @@ namespace DirectConnectIP;
 public static class ModEntry
 {
     public static readonly ModConfigManager Config = new();
-    private const string Version = "1.2.0";
+    private const string Version = "1.2.2";
 
     public static void Initialize()
     {
