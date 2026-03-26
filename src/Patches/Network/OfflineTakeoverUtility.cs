@@ -2,39 +2,68 @@
 using System.Collections.Generic;
 using HarmonyLib;
 using MegaCrit.Sts2.Core.GameActions;
-using MegaCrit.Sts2.Core.GameActions.Multiplayer;
 using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Multiplayer;
 using MegaCrit.Sts2.Core.Multiplayer.Game;
 using MegaCrit.Sts2.Core.Runs;
+using MegaCrit.Sts2.Core.Context;
+using MegaCrit.Sts2.Core.GameActions.Multiplayer;
 
 namespace DirectConnectIP.Patches.Network;
 
 public static class OfflineTakeoverUtility
 {
     public static bool IsTakeoverEnabled() => ModEntry.Config.EnableOfflineTakeover;
-    public static bool IsGhost(ulong netId) => !GetOnlineIds().Contains(netId);
+
+    public static bool IsGhost(ulong netId)
+    {
+        if (LocalContext.NetId.HasValue && netId == LocalContext.NetId.Value)
+        {
+            return false;
+        }
+
+        var netService = RunManager.Instance.NetService;
+        if (netService.Type != NetGameType.Host && netService.Type != NetGameType.Client)
+        {
+            return false;
+        }
+
+        return !GetOnlineIds().Contains(netId);
+    }
 
     private static HashSet<ulong> GetOnlineIds()
     {
-        var ids = new HashSet<ulong> { ModEntry.Config.LocalPlayerId };
-        var netService = RunManager.Instance.NetService;
+        var ids = new HashSet<ulong> { LocalContext.NetId.HasValue ? LocalContext.NetId.Value : ModEntry.Config.LocalPlayerId };
 
+        var netService = RunManager.Instance.NetService;
         if (!netService.IsConnected) return ids;
 
-        if (netService.Type == NetGameType.Host && netService is NetHostGameService hostService)
+        switch (netService.Type)
         {
-            foreach (var peer in hostService.ConnectedPeers)
+            case NetGameType.Host when netService is NetHostGameService hostService:
             {
-                ids.Add(peer.peerId);
+                foreach (var peer in hostService.ConnectedPeers)
+                {
+                    ids.Add(peer.peerId);
+                }
+
+                break;
             }
-        }
-        else if (netService.Type == NetGameType.Client)
-        {
-            foreach (var id in PlayerNameRegistry.RemoteNames.Keys)
+            case NetGameType.Client:
             {
-                ids.Add(id);
+                foreach (var id in PlayerNameRegistry.RemoteNames.Keys)
+                {
+                    ids.Add(id);
+                }
+
+                break;
             }
+            case NetGameType.None:
+            case NetGameType.Singleplayer:
+            case NetGameType.Replay:
+                break;
+            default:
+                throw new ArgumentOutOfRangeException();
         }
 
         return ids;
