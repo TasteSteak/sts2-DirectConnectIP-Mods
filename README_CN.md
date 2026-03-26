@@ -1,10 +1,10 @@
 ﻿<div align="center">
 
-# 杀戮尖塔2 IP直连联机 (Direct IP Multiplayer)
+# 杀戮尖塔2 IP直连联机 (DirectConnectIP)
 
 [**English**](README.md) | [**更新日志**](Changelog.md)
 
-![Version](https://img.shields.io/badge/Version-1.2.3-blue.svg)
+![Version](https://img.shields.io/badge/Version-1.2.4-blue.svg)
 ![Game](https://img.shields.io/badge/Slay_The_Spire_2-Mod-red.svg)
 ![License](https://img.shields.io/badge/License-CC%20BY--NC%204.0-lightgrey.svg)
 ![Platform](https://img.shields.io/badge/Platform-Windows-blue.svg)

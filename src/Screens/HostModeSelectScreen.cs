@@ -17,20 +17,11 @@ public partial class HostModeSelectScreen(Action onModeSelectedAndContinue) : Di
 
     protected override void BuildUi()
     {
-        var headerBox = new HBoxContainer { CustomMinimumSize = new Vector2(420, 40) };
-        headerBox.AddChild(new Control { CustomMinimumSize = new Vector2(40, 40) });
-
         var titleLabel = CreateTitleLabel(LocTexts.TitleHostMode);
         titleLabel.SizeFlagsHorizontal = Control.SizeFlags.ExpandFill;
         titleLabel.HorizontalAlignment = HorizontalAlignment.Center; 
-        headerBox.AddChild(titleLabel);
-
-        var faqBtn = CreateButton("?", new Color(0.25f, 0.45f, 0.65f), new Vector2(40, 40), 18);
-        faqBtn.TooltipText = LocTexts.TooltipFaq;
-        faqBtn.Pressed += () => new FaqScreen().OpenScreen(GetParent(), closeOthers: false);
-        headerBox.AddChild(faqBtn);
-            
-        Vbox.AddChild(headerBox);
+        titleLabel.CustomMinimumSize = new Vector2(0, 40);
+        Vbox.AddChild(titleLabel);
 
         var btnContainer = CreateVBoxContainer(20);
         Vbox.AddChild(btnContainer);

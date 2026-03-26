@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Net;
+using System.Net.Sockets;
 
 namespace DirectConnectIP.Helpers;
 
@@ -15,8 +16,12 @@ internal static class IpAddressParser
         if (raw.StartsWith('['))
         {
             var end = raw.IndexOf(']');
-            if (end <= 0) return IsValidHost(host) && port > 0;
-            if (raw.Length > end + 1 && raw[end + 1] == ':') ushort.TryParse(raw.AsSpan(end + 2), out port);
+            if (end <= 0) return false;
+            
+            if (raw.Length > end + 1 && raw[end + 1] == ':')
+            {
+                if (!ushort.TryParse(raw.AsSpan(end + 2), out port)) return false;
+            }
             host = raw[1..end];
         }
         else
@@ -24,10 +29,13 @@ internal static class IpAddressParser
             var lastColon = raw.LastIndexOf(':');
             if (lastColon > 0 && raw.IndexOf(':') == lastColon)
             {
-                ushort.TryParse(raw[(lastColon + 1)..], out port);
+                if (!ushort.TryParse(raw.AsSpan(lastColon + 1), out port)) return false;
                 host = raw[..lastColon];
             }
-            else host = raw;
+            else 
+            {
+                host = raw;
+            }
         }
 
         return IsValidHost(host) && port > 0;
@@ -36,7 +44,13 @@ internal static class IpAddressParser
     private static bool IsValidHost(string host)
     {
         if (host.Equals("localhost", StringComparison.OrdinalIgnoreCase)) return true;
-        if (IPAddress.TryParse(host, out _)) return true;
-        return Uri.CheckHostName(host) == UriHostNameType.Dns && host.Contains('.');
+
+        if (!IPAddress.TryParse(host, out var ip)) return Uri.CheckHostName(host) == UriHostNameType.Dns && host.Contains('.');
+        if (ip.AddressFamily == AddressFamily.InterNetwork)
+        {
+            return host.AsSpan().Count('.') == 3;
+        }
+        return true;
+
     }
 }

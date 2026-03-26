@@ -82,7 +82,12 @@ public class DirectHost(INetHostHandler handler) : NetHost(handler)
         foreach (var pending in _pendingHandshakes.ToList().Where(pending => now - pending.ReceivedMsec > 10000))
         {
             _logger.Warn($"Handshake timeout for peer");
-            try { pending.Peer.Reset(); } catch { }
+            try { pending.Peer.Reset(); }
+            catch
+            {
+                // ignored
+            }
+
             _pendingHandshakes.Remove(pending);
         }
     }
@@ -130,17 +135,17 @@ public class DirectHost(INetHostHandler handler) : NetHost(handler)
                     if (conn.HasValue)
                     {
                         var rawData = packet.AsAppMessage();
-
-                        if (ModPacketRouter.IsModPacket(rawData))
+                        if (data.channel == 1)
                         {
+                            if (!ModPacketRouter.IsModPacket(rawData)) return;
+                            
                             var modPacket = ModPacketRouter.Deserialize(rawData);
                             if (modPacket != null) HandleModPacket(conn.Value.NetId, modPacket);
                             return;
                         }
-        
                         _handler.OnPacketReceived(conn.Value.NetId, rawData, data.mode, data.channel);
                     }
-                    else { _logger.Error($"Received non-handshake packet from unknown peer"); }
+                    else { _logger.Error("Received non-handshake packet from unknown peer"); }
                     break;
                 }
             }
@@ -154,7 +159,7 @@ public class DirectHost(INetHostHandler handler) : NetHost(handler)
         if (!conn.HasValue) return;
         var packetData = ModPacketRouter.Serialize(packet);
         var enetPacket = ENetPacket.FromAppMessage(packetData, packetData.Length);
-        conn.Value.Peer.Send(0, enetPacket.AllBytes, ENetUtil.FlagsFromMode(NetTransferMode.Reliable));
+        conn.Value.Peer.Send(ModPacketRouter.Channel, enetPacket.AllBytes, ENetUtil.FlagsFromMode(NetTransferMode.Reliable));
     }
 
     private void BroadcastModPacket(IModPacket packet, ulong? excludeId = null)
@@ -163,7 +168,7 @@ public class DirectHost(INetHostHandler handler) : NetHost(handler)
         var enetPacket = ENetPacket.FromAppMessage(packetData, packetData.Length);
         foreach (var conn in _connectedPeers.Where(conn => !excludeId.HasValue || conn.NetId != excludeId.Value))
         {
-            conn.Peer.Send(0, enetPacket.AllBytes, ENetUtil.FlagsFromMode(NetTransferMode.Reliable));
+            conn.Peer.Send(ModPacketRouter.Channel, enetPacket.AllBytes, ENetUtil.FlagsFromMode(NetTransferMode.Reliable));
         }
     }
 
@@ -207,7 +212,12 @@ public class DirectHost(INetHostHandler handler) : NetHost(handler)
 
     private async Task DelayedHandshakeQueue(ENetPacketPeer peer, ulong clientNetId)
     {
-        try { await Task.Delay(10); } catch { }
+        try { await Task.Delay(10); }
+        catch
+        {
+            // ignored
+        }
+
         _mainThreadActions.Enqueue(() => CompleteHandshakeSync(peer, clientNetId));
     }
 
@@ -217,10 +227,15 @@ public class DirectHost(INetHostHandler handler) : NetHost(handler)
         {
             netId = _hostNetId, status = ENetHandshakeStatus.Success
         });
-        peer.Send(0, successResp.AllBytes, 1);
+        peer.Send(ModPacketRouter.Channel, successResp.AllBytes, 1);
 
         var pending = _pendingHandshakes.FirstOrDefault(p => p.Peer == peer);
-        if (pending.Peer != null) _pendingHandshakes.Remove(pending);
+        if (pending.Peer == null) 
+        {
+            _logger.Warn($"客户端 {clientNetId} 在握手延迟期间已断开，中止连接建立。");
+            return;
+        }
+        _pendingHandshakes.Remove(pending);
 
         _connectedPeers.Add(new ClientConnection { Peer = peer, NetId = clientNetId });
         _handler.OnPeerConnected(clientNetId);

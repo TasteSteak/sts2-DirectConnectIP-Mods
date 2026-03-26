@@ -2,6 +2,7 @@
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
+using System.Reflection;
 using System.Threading.Tasks;
 using HarmonyLib;
 using MegaCrit.Sts2.Core.Combat;
@@ -17,8 +18,8 @@ using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Models.Relics;
 using MegaCrit.Sts2.Core.Multiplayer;
 using MegaCrit.Sts2.Core.Multiplayer.Game;
+using MegaCrit.Sts2.Core.Multiplayer.Game.PeerInput;
 using MegaCrit.Sts2.Core.Multiplayer.Messages.Game;
-using MegaCrit.Sts2.Core.Nodes.Screens.TreasureRoomRelic;
 using MegaCrit.Sts2.Core.Runs;
 using MegaCrit.Sts2.Core.Saves;
 using MegaCrit.Sts2.Core.Saves.Runs;
@@ -28,12 +29,12 @@ namespace DirectConnectIP.Patches.Network;
 [HarmonyPatch(typeof(PlayCardAction), "ExecuteAction")]
 public static class PlayCardActionGhostPatch
 {
-    static bool Prepare() => OfflineTakeoverUtility.IsTakeoverEnabled();
+    static bool Prepare() => OfflineTakeoverCore.IsTakeoverEnabled();
 
     public static void Prefix(PlayCardAction __instance, out IDisposable __state)
     {
         __state = null;
-        if (OfflineTakeoverUtility.IsGhost(__instance.OwnerId))
+        if (OfflineTakeoverCore.IsGhost(__instance.OwnerId))
         {
             __state = CardSelectCmd.PushSelector(new VakuuCardSelector());
         }
@@ -43,7 +44,14 @@ public static class PlayCardActionGhostPatch
     {
         if (__state != null && __result != null)
         {
-            __result.ContinueWith(_ => __state.Dispose());
+            if (System.Threading.SynchronizationContext.Current != null)
+            {
+                __result.ContinueWith(_ => __state.Dispose(), TaskScheduler.FromCurrentSynchronizationContext());
+            }
+            else
+            {
+                __result.ContinueWith(_ => __state.Dispose());
+            }
         }
         else
         {
@@ -53,12 +61,13 @@ public static class PlayCardActionGhostPatch
 }
 
 // ==========================================
-// 后台并发出牌
+// 战斗托管：后台并发出牌
 // ==========================================
 [HarmonyPatch(typeof(ActionQueueSynchronizer), nameof(ActionQueueSynchronizer.SetCombatState))]
 public static class ConcurrentAutoPlayTurnPatch
 {
-    static bool Prepare() => OfflineTakeoverUtility.IsTakeoverEnabled();
+    private static readonly HashSet<ulong> ActiveAiTasks = [];
+    static bool Prepare() => OfflineTakeoverCore.IsTakeoverEnabled();
 
     public static void Postfix(ActionQueueSynchronizer __instance, ActionSynchronizerCombatState combatState)
     {
@@ -72,7 +81,9 @@ public static class ConcurrentAutoPlayTurnPatch
 
         foreach (var p in state.Players)
         {
-            if (!OfflineTakeoverUtility.IsGhost(p.NetId) || !p.Creature.IsAlive) continue;
+            if (!OfflineTakeoverCore.IsGhost(p.NetId) || !p.Creature.IsAlive) continue;
+            if (!ActiveAiTasks.Add(p.NetId)) continue;
+
             RunGhostAiTask(p, roundNumber);
         }
     }
@@ -111,11 +122,10 @@ public static class ConcurrentAutoPlayTurnPatch
                             target = null; 
                             break;
                     }
-
-                    Log.Info($"[DirectConnectIP] 幽灵并发 AI 生成出牌动作: {cardToPlay.Id.Entry}");
                     pendingCards.Add(cardToPlay);
                     var playAction = new PlayCardAction(cardToPlay, target);
-                    OfflineTakeoverUtility.EnqueueGhostAction(playAction, ghostPlayer.NetId);
+                    
+                    OfflineTakeoverCore.EnqueueGhostAction(playAction, ghostPlayer.NetId);
 
                     await Task.Delay(1200); 
                 }
@@ -125,8 +135,7 @@ public static class ConcurrentAutoPlayTurnPatch
                 }
                 else
                 {
-                    Log.Info($"[DirectConnectIP] 幽灵玩家 {ghostPlayer.NetId} 无牌可出，提交回合结束指令。");
-                    OfflineTakeoverUtility.EnqueueGhostAction(new EndPlayerTurnAction(ghostPlayer, roundNumber), ghostPlayer.NetId);
+                    OfflineTakeoverCore.EnqueueGhostAction(new EndPlayerTurnAction(ghostPlayer, roundNumber), ghostPlayer.NetId);
                     break;
                 }
             }
@@ -136,8 +145,12 @@ public static class ConcurrentAutoPlayTurnPatch
             Log.Error($"[DirectConnectIP] 幽灵后台 AI 发生异常: {ex}");
             if (!CombatManager.Instance.IsPlayerReadyToEndTurn(ghostPlayer))
             {
-                OfflineTakeoverUtility.EnqueueGhostAction(new EndPlayerTurnAction(ghostPlayer, roundNumber), ghostPlayer.NetId);
+                OfflineTakeoverCore.EnqueueGhostAction(new EndPlayerTurnAction(ghostPlayer, roundNumber), ghostPlayer.NetId);
             }
+        }
+        finally
+        {
+            ActiveAiTasks.Remove(ghostPlayer.NetId);
         }
     }
 }
@@ -148,7 +161,9 @@ public static class ConcurrentAutoPlayTurnPatch
 [HarmonyPatch(typeof(ActionQueueSynchronizer), nameof(ActionQueueSynchronizer.SetCombatState))]
 public static class AutoReadyEnemyTurnPatch
 {
-    static bool Prepare() => OfflineTakeoverUtility.IsTakeoverEnabled();
+    private static readonly FieldInfo ReadyPlayersField = AccessTools.Field(typeof(CombatManager), "_playersReadyToBeginEnemyTurn");
+
+    static bool Prepare() => OfflineTakeoverCore.IsTakeoverEnabled();
 
     public static void Postfix(ActionQueueSynchronizer __instance, ActionSynchronizerCombatState combatState)
     {
@@ -159,14 +174,14 @@ public static class AutoReadyEnemyTurnPatch
         var state = CombatManager.Instance.DebugOnlyGetState();
         if (state == null) return;
 
-        var readySet = (HashSet<Player>)AccessTools.Field(typeof(CombatManager), "_playersReadyToBeginEnemyTurn")?.GetValue(CombatManager.Instance);
+        var readySet = ReadyPlayersField?.GetValue(CombatManager.Instance) as HashSet<Player>;
         
         foreach (var p in state.Players)
         {
-            if (!OfflineTakeoverUtility.IsGhost(p.NetId) || !p.Creature.IsAlive) continue;
+            if (!OfflineTakeoverCore.IsGhost(p.NetId) || !p.Creature.IsAlive) continue;
             if (readySet == null || readySet.Contains(p)) continue;
-            Log.Info($"[DirectConnectIP] 队列清空完毕，为主机托管的幽灵 {p.NetId} 发送迎击指令。");
-            OfflineTakeoverUtility.EnqueueGhostAction(new ReadyToBeginEnemyTurnAction(p), p.NetId);
+            
+            OfflineTakeoverCore.EnqueueGhostAction(new ReadyToBeginEnemyTurnAction(p), p.NetId);
         }
     }
 }
@@ -177,7 +192,7 @@ public static class AutoReadyEnemyTurnPatch
 [HarmonyPatch(typeof(CombatManager), nameof(CombatManager.SetReadyToEndTurn))]
 public static class CombatTurnEndTakeoverPatch
 {
-    static bool Prepare() => OfflineTakeoverUtility.IsTakeoverEnabled();
+    static bool Prepare() => OfflineTakeoverCore.IsTakeoverEnabled();
 
     public static void Postfix(CombatManager __instance, Player player)
     {
@@ -185,16 +200,16 @@ public static class CombatTurnEndTakeoverPatch
 
         var state = __instance.DebugOnlyGetState();
         if (state == null || !__instance.IsInProgress || state.CurrentSide != CombatSide.Player) return;
-        if (state.Players.All(p => OfflineTakeoverUtility.IsGhost(p.NetId))) return;
+        if (state.Players.All(p => OfflineTakeoverCore.IsGhost(p.NetId))) return;
 
-        var allOnlineReady = state.Players.Where(p => !OfflineTakeoverUtility.IsGhost(p.NetId) && p.Creature.IsAlive).All(__instance.IsPlayerReadyToEndTurn);
+        var allOnlineReady = state.Players.Where(p => !OfflineTakeoverCore.IsGhost(p.NetId) && p.Creature.IsAlive).All(__instance.IsPlayerReadyToEndTurn);
         if (!allOnlineReady) return;
 
         var roundNumber = state.RoundNumber;
         foreach (var p in state.Players)
         {
-            if (!OfflineTakeoverUtility.IsGhost(p.NetId) || !p.Creature.IsAlive || __instance.IsPlayerReadyToEndTurn(p)) continue;
-            OfflineTakeoverUtility.EnqueueGhostAction(new EndPlayerTurnAction(p, roundNumber), p.NetId);
+            if (!OfflineTakeoverCore.IsGhost(p.NetId) || !p.Creature.IsAlive || __instance.IsPlayerReadyToEndTurn(p)) continue;
+            OfflineTakeoverCore.EnqueueGhostAction(new EndPlayerTurnAction(p, roundNumber), p.NetId);
         }
     }
 }
@@ -202,26 +217,27 @@ public static class CombatTurnEndTakeoverPatch
 [HarmonyPatch(typeof(CombatManager), nameof(CombatManager.SetReadyToBeginEnemyTurn))]
 public static class SetReadyToBeginEnemyTakeoverPatch
 {
-    static bool Prepare() => OfflineTakeoverUtility.IsTakeoverEnabled();
+    private static readonly FieldInfo ReadyPlayersField = AccessTools.Field(typeof(CombatManager), "_playersReadyToBeginEnemyTurn");
+
+    static bool Prepare() => OfflineTakeoverCore.IsTakeoverEnabled();
 
     public static void Postfix(CombatManager __instance, Player player)
     {
         if (RunManager.Instance.NetService.Type != NetGameType.Host) return;
 
-        var readySet = (HashSet<Player>)AccessTools.Field(typeof(CombatManager), "_playersReadyToBeginEnemyTurn")?.GetValue(__instance);
-        if (readySet == null) return;
+        if (ReadyPlayersField?.GetValue(__instance) is not HashSet<Player> readySet) return;
             
         var state = __instance.DebugOnlyGetState();
         if (state == null) return;
-        if (state.Players.All(p => OfflineTakeoverUtility.IsGhost(p.NetId))) return;
+        if (state.Players.All(p => OfflineTakeoverCore.IsGhost(p.NetId))) return;
 
-        var allOnlineReady = state.Players.Where(p => !OfflineTakeoverUtility.IsGhost(p.NetId)).All(p => readySet.Contains(p));
+        var allOnlineReady = state.Players.Where(p => !OfflineTakeoverCore.IsGhost(p.NetId)).All(p => readySet.Contains(p));
         if (!allOnlineReady) return;
         
-        foreach (var p in state.Players.Where(p => OfflineTakeoverUtility.IsGhost(p.NetId)))
+        foreach (var p in state.Players.Where(p => OfflineTakeoverCore.IsGhost(p.NetId)))
         {
             if (readySet.Contains(p)) continue;
-            OfflineTakeoverUtility.EnqueueGhostAction(new ReadyToBeginEnemyTurnAction(p), p.NetId);
+            OfflineTakeoverCore.EnqueueGhostAction(new ReadyToBeginEnemyTurnAction(p), p.NetId);
         }
     }
 }
@@ -232,19 +248,20 @@ public static class SetReadyToBeginEnemyTakeoverPatch
 [HarmonyPatch(typeof(MapSelectionSynchronizer), nameof(MapSelectionSynchronizer.PlayerVotedForMapCoord))]
 public static class MapSelectionGhostPatch
 {
-    static bool Prepare() => OfflineTakeoverUtility.IsTakeoverEnabled();
+    private static readonly FieldInfo VotesField = AccessTools.Field(typeof(MapSelectionSynchronizer), "_votes");
+    private static readonly MethodInfo MoveMethod = AccessTools.Method(typeof(MapSelectionSynchronizer), "MoveToMapCoord");
+
+    static bool Prepare() => OfflineTakeoverCore.IsTakeoverEnabled();
 
     public static void Postfix(MapSelectionSynchronizer __instance)
     {
         if (RunManager.Instance.NetService.Type != NetGameType.Host) return;
-
-        var votesList = AccessTools.Field(typeof(MapSelectionSynchronizer), "_votes")?.GetValue(__instance) as IList;
-        if (votesList == null) return;
+        if (VotesField?.GetValue(__instance) is not IList votesList) return;
 
         var players = RunManager.Instance.DebugOnlyGetState()?.Players;
         if (players == null) return;
 
-        if (players.All(p => OfflineTakeoverUtility.IsGhost(p.NetId))) return;
+        if (players.All(p => OfflineTakeoverCore.IsGhost(p.NetId))) return;
 
         MapVote? fallbackVote = null;
         var allOnlineVoted = true;
@@ -252,7 +269,7 @@ public static class MapSelectionGhostPatch
         for (var i = 0; i < players.Count; i++)
         {
             if (i >= votesList.Count) break;
-            if (OfflineTakeoverUtility.IsGhost(players[i].NetId)) continue;
+            if (OfflineTakeoverCore.IsGhost(players[i].NetId)) continue;
 
             if (votesList[i] is not MapVote vote) allOnlineVoted = false;
             else fallbackVote = vote;
@@ -267,7 +284,7 @@ public static class MapSelectionGhostPatch
             votesList[i] = fallbackVote;
             needsInvoke = true;
         }
-        if (needsInvoke) AccessTools.Method(typeof(MapSelectionSynchronizer), "MoveToMapCoord")?.Invoke(__instance, null);
+        if (needsInvoke) MoveMethod?.Invoke(__instance, null);
     }
 }
 
@@ -277,22 +294,25 @@ public static class MapSelectionGhostPatch
 [HarmonyPatch(typeof(TreasureRoomRelicSynchronizer), nameof(TreasureRoomRelicSynchronizer.OnPicked))]
 public static class TreasureUnblockPatch
 {
-    static bool Prepare() => OfflineTakeoverUtility.IsTakeoverEnabled();
+    private static readonly FieldInfo PlayerCollectionField = AccessTools.Field(typeof(TreasureRoomRelicSynchronizer), "_playerCollection");
+    private static readonly FieldInfo VotesField = AccessTools.Field(typeof(TreasureRoomRelicSynchronizer), "_votes");
+    private static readonly FieldInfo CurrentRelicsField = AccessTools.Field(typeof(TreasureRoomRelicSynchronizer), "_currentRelics");
+    
+    private static FieldInfo _voteReceivedField;
+    private static FieldInfo _voteIndexField;
+
+    static bool Prepare() => OfflineTakeoverCore.IsTakeoverEnabled();
 
     public static void Postfix(TreasureRoomRelicSynchronizer __instance, Player player)
     {
         if (RunManager.Instance.NetService.Type != NetGameType.Host) return;
 
-        var playerCollectionField = AccessTools.Field(typeof(TreasureRoomRelicSynchronizer), "_playerCollection");
-        var votesField = AccessTools.Field(typeof(TreasureRoomRelicSynchronizer), "_votes");
-        var currentRelicsField = AccessTools.Field(typeof(TreasureRoomRelicSynchronizer), "_currentRelics");
-
-        var playerCollection = playerCollectionField?.GetValue(__instance) as IPlayerCollection;
-        var votesList = votesField?.GetValue(__instance) as IList;
-        var currentRelics = currentRelicsField?.GetValue(__instance) as IEnumerable; 
+        var playerCollection = PlayerCollectionField?.GetValue(__instance) as IPlayerCollection;
+        var votesList = VotesField?.GetValue(__instance) as IList;
+        var currentRelics = CurrentRelicsField?.GetValue(__instance) as IEnumerable; 
 
         if (playerCollection == null || votesList == null || currentRelics == null) return;
-        if (playerCollection.Players.All(p => OfflineTakeoverUtility.IsGhost(p.NetId))) return;
+        if (playerCollection.Players.All(p => OfflineTakeoverCore.IsGhost(p.NetId))) return;
 
         var relicCount = currentRelics.Cast<object>().Count();
         if (relicCount == 0) return;
@@ -304,7 +324,7 @@ public static class TreasureUnblockPatch
             if (i >= votesList.Count) break;
             
             var pId = playerCollection.Players[i].NetId;
-            if (OfflineTakeoverUtility.IsGhost(pId)) continue;
+            if (OfflineTakeoverCore.IsGhost(pId)) continue;
             
             if (!HasVoted(votesList[i], out var vIndex)) return;
             if (vIndex.HasValue) usedIndices.Add(vIndex.Value);
@@ -315,9 +335,9 @@ public static class TreasureUnblockPatch
             if (i >= votesList.Count) break;
 
             var ghostPlayer = playerCollection.Players[i];
-            if (!OfflineTakeoverUtility.IsGhost(ghostPlayer.NetId) || HasVoted(votesList[i], out _)) continue;
+            if (!OfflineTakeoverCore.IsGhost(ghostPlayer.NetId) || HasVoted(votesList[i], out _)) continue;
 
-            var pickIndex = 0;
+            var pickIndex = -1;
             for (var j = 0; j < relicCount; j++)
             {
                 if (usedIndices.Contains(j)) continue;
@@ -326,6 +346,7 @@ public static class TreasureUnblockPatch
                 break;
             }
 
+            if (pickIndex == -1) continue;
             GameAction pickAction;
             try 
             {
@@ -336,7 +357,7 @@ public static class TreasureUnblockPatch
                 pickAction = (GameAction)Activator.CreateInstance(typeof(PickRelicAction), ghostPlayer, pickIndex);
             }
 
-            if (pickAction != null) OfflineTakeoverUtility.EnqueueGhostAction(pickAction, ghostPlayer.NetId);
+            if (pickAction != null) OfflineTakeoverCore.EnqueueGhostAction(pickAction, ghostPlayer.NetId);
         }
 
         return;
@@ -346,40 +367,55 @@ public static class TreasureUnblockPatch
             votedIndex = null;
             if (voteObj == null) return false;
 
-            var type = voteObj.GetType();
-
-            var voteReceivedField = AccessTools.Field(type, "voteReceived");
-            if (voteReceivedField != null)
+            if (_voteReceivedField == null)
             {
-                var indexField = AccessTools.Field(type, "index");
-                var received = (bool)voteReceivedField.GetValue(voteObj)!;
-                votedIndex = indexField?.GetValue(voteObj) as int?;
+                var type = voteObj.GetType();
+                _voteReceivedField = AccessTools.Field(type, "voteReceived");
+                _voteIndexField = AccessTools.Field(type, "index");
+            }
+
+            if (_voteReceivedField != null)
+            {
+                var received = (bool)_voteReceivedField.GetValue(voteObj)!;
+                votedIndex = _voteIndexField?.GetValue(voteObj) as int?;
                 return received;
             }
 
-            if (type != typeof(int)) return false;
-            votedIndex = (int)voteObj;
+            if (voteObj is not int intVote) return false;
+            votedIndex = intVote;
             return true;
 
         }
     }
 }
 
-[HarmonyPatch(typeof(NHandImageCollection), "UpdateHandVisibility")]
-public static class TreasureHandExceptionHandlerPatch
+// ==========================================
+// 幽灵玩家鼠标指针/输入状态
+// ==========================================
+[HarmonyPatch(typeof(PeerInputSynchronizer), "ForceGetStateForPlayer")]
+public static class PeerInputStateGhostPatch
 {
-    static bool Prepare() => OfflineTakeoverUtility.IsTakeoverEnabled();
+    private static readonly MethodInfo GetOrCreateMethod = AccessTools.Method(typeof(PeerInputSynchronizer), "GetOrCreateStateForPlayer");
+    static bool Prepare() => OfflineTakeoverCore.IsTakeoverEnabled();
 
-    public static Exception Finalizer(Exception __exception)
+    public static bool Prefix(PeerInputSynchronizer __instance, ulong playerId, ref object __result)
     {
-        switch (__exception)
+        if (!OfflineTakeoverCore.IsGhost(playerId)) return true;
+
+        try
         {
-            case null:
-            case InvalidOperationException when __exception.Message.Contains("PeerInputState"):
-                return null;
-            default:
-                return __exception;
+            if (GetOrCreateMethod != null)
+            {
+                __result = GetOrCreateMethod.Invoke(__instance, [playerId]);
+                return false;
+            }
         }
+        catch 
+        {
+            // 静默
+        }
+        
+        return true;
     }
 }
 
@@ -389,22 +425,19 @@ public static class TreasureHandExceptionHandlerPatch
 [HarmonyPatch(typeof(ActChangeSynchronizer), nameof(ActChangeSynchronizer.OnPlayerReady))]
 public static class ActChangeGhostPatch
 {
-    static bool Prepare() => OfflineTakeoverUtility.IsTakeoverEnabled();
+    private static readonly FieldInfo RunStateField = AccessTools.Field(typeof(ActChangeSynchronizer), "_runState");
+    private static readonly FieldInfo ReadyPlayersField = AccessTools.Field(typeof(ActChangeSynchronizer), "_readyPlayers");
+
+    static bool Prepare() => OfflineTakeoverCore.IsTakeoverEnabled();
 
     public static void Postfix(ActChangeSynchronizer __instance, Player player)
     {
         if (RunManager.Instance.NetService.Type != NetGameType.Host) return;
+        if (RunStateField?.GetValue(__instance) is not RunState state) return;
+        if (state.Players.All(p => OfflineTakeoverCore.IsGhost(p.NetId))) return;
+        if (ReadyPlayersField?.GetValue(__instance) is not IList readyPlayers) return;
 
-        var stateField = AccessTools.Field(typeof(ActChangeSynchronizer), "_runState");
-        if (stateField?.GetValue(__instance) is not RunState state) return;
-
-        if (state.Players.All(p => OfflineTakeoverUtility.IsGhost(p.NetId))) return;
-
-        var readyPlayersField = AccessTools.Field(typeof(ActChangeSynchronizer), "_readyPlayers");
-        if (readyPlayersField?.GetValue(__instance) is not IList readyPlayers) return;
-
-        var allOnlineReady = !state.Players.Where((t, i) => !OfflineTakeoverUtility.IsGhost(t.NetId) && (i >= readyPlayers.Count || !(bool)readyPlayers[i]!)).Any();
-
+        var allOnlineReady = !state.Players.Where((t, i) => !OfflineTakeoverCore.IsGhost(t.NetId) && (i >= readyPlayers.Count || !(bool)readyPlayers[i]!)).Any();
         if (!allOnlineReady) return;
 
         for (var i = 0; i < state.Players.Count; i++)
@@ -412,10 +445,9 @@ public static class ActChangeGhostPatch
             if (i >= readyPlayers.Count) break;
             
             var ghostPlayer = state.Players[i];
-            if (!OfflineTakeoverUtility.IsGhost(ghostPlayer.NetId) || (bool)readyPlayers[i]) continue;
+            if (!OfflineTakeoverCore.IsGhost(ghostPlayer.NetId) || (bool)readyPlayers[i]!) continue;
             
-            Log.Info($"[DirectConnectIP] 真人已确认前往下一章，为幽灵 {ghostPlayer.NetId} 自动发送跳转指令。");
-            OfflineTakeoverUtility.EnqueueGhostAction(new VoteToMoveToNextActAction(ghostPlayer), ghostPlayer.NetId);
+            OfflineTakeoverCore.EnqueueGhostAction(new VoteToMoveToNextActAction(ghostPlayer), ghostPlayer.NetId);
         }
     }
 }
@@ -426,22 +458,26 @@ public static class ActChangeGhostPatch
 [HarmonyPatch(typeof(CombatStateSynchronizer), nameof(CombatStateSynchronizer.StartSync))]
 public static class CombatSyncTakeoverPatch
 {
-    static bool Prepare() => OfflineTakeoverUtility.IsTakeoverEnabled();
+    private static readonly FieldInfo NetServiceField = AccessTools.Field(typeof(CombatStateSynchronizer), "_netService");
+    private static readonly FieldInfo RunStateField = AccessTools.Field(typeof(CombatStateSynchronizer), "_runState");
+    private static readonly FieldInfo SyncDataField = AccessTools.Field(typeof(CombatStateSynchronizer), "_syncData");
+    private static readonly MethodInfo CheckSyncMethod = AccessTools.Method(typeof(CombatStateSynchronizer), "CheckSyncCompleted");
+
+    static bool Prepare() => OfflineTakeoverCore.IsTakeoverEnabled();
 
     public static void Postfix(CombatStateSynchronizer __instance)
     {
-        var netService = (INetGameService)AccessTools.Field(typeof(CombatStateSynchronizer), "_netService")?.GetValue(__instance);
-        if (netService is not { Type: NetGameType.Host }) return;
+        if (NetServiceField?.GetValue(__instance) is not INetGameService { Type: NetGameType.Host } netService) return;
 
-        var runState = (RunState)AccessTools.Field(typeof(CombatStateSynchronizer), "_runState")?.GetValue(__instance);
-        var syncData = (Dictionary<ulong, SerializablePlayer>)AccessTools.Field(typeof(CombatStateSynchronizer), "_syncData")?.GetValue(__instance);
+        var runState = RunStateField?.GetValue(__instance) as RunState;
+        var syncData = SyncDataField?.GetValue(__instance) as Dictionary<ulong, SerializablePlayer>;
         if (runState == null || syncData == null) return;
 
-        if (runState.Players.All(p => OfflineTakeoverUtility.IsGhost(p.NetId))) return;
+        if (runState.Players.All(p => OfflineTakeoverCore.IsGhost(p.NetId))) return;
 
         foreach (var ghostPlayer in runState.Players)
         {
-            if (!OfflineTakeoverUtility.IsGhost(ghostPlayer.NetId)) continue;
+            if (!OfflineTakeoverCore.IsGhost(ghostPlayer.NetId)) continue;
             
             var serializedGhost = ghostPlayer.ToSerializable();
             syncData[ghostPlayer.NetId] = serializedGhost;
@@ -451,9 +487,9 @@ public static class CombatSyncTakeoverPatch
 
         try
         {
-            AccessTools.Method(typeof(CombatStateSynchronizer), "CheckSyncCompleted")?.Invoke(__instance, null);
+            CheckSyncMethod?.Invoke(__instance, null);
         }
-        catch (System.Reflection.TargetInvocationException ex) when (ex.InnerException is InvalidOperationException)
+        catch (TargetInvocationException ex) when (ex.InnerException is InvalidOperationException)
         {
         }
     }
@@ -462,24 +498,26 @@ public static class CombatSyncTakeoverPatch
 [HarmonyPatch(typeof(CombatStateSynchronizer), "OnSyncPlayerMessageReceived")]
 public static class CombatSyncReceiveTakeoverPatch
 {
-    static bool Prepare() => OfflineTakeoverUtility.IsTakeoverEnabled();
+    private static readonly FieldInfo SyncDataField = AccessTools.Field(typeof(CombatStateSynchronizer), "_syncData");
+    private static readonly MethodInfo CheckSyncMethod = AccessTools.Method(typeof(CombatStateSynchronizer), "CheckSyncCompleted");
+
+    static bool Prepare() => OfflineTakeoverCore.IsTakeoverEnabled();
 
     public static bool Prefix(CombatStateSynchronizer __instance, SyncPlayerDataMessage syncMessage, ulong senderId)
     {
         var realPlayerId = syncMessage.player.NetId;
 
         if (realPlayerId == senderId) return true;
-        
-        var syncData = (Dictionary<ulong, SerializablePlayer>)AccessTools.Field(typeof(CombatStateSynchronizer), "_syncData")?.GetValue(__instance);
-        if (syncData == null) return false;
+
+        if (SyncDataField?.GetValue(__instance) is not Dictionary<ulong, SerializablePlayer> syncData) return false;
         
         syncData[realPlayerId] = syncMessage.player;
         
         try 
         {
-            AccessTools.Method(typeof(CombatStateSynchronizer), "CheckSyncCompleted")?.Invoke(__instance, null);
+            CheckSyncMethod?.Invoke(__instance, null);
         }
-        catch (System.Reflection.TargetInvocationException ex) when (ex.InnerException is InvalidOperationException)
+        catch (TargetInvocationException ex) when (ex.InnerException is InvalidOperationException)
         {
         }
         
@@ -494,25 +532,29 @@ public static class CombatSyncReceiveTakeoverPatch
 [HarmonyPatch(typeof(EventSynchronizer), "PlayerVotedForSharedOptionIndex")]
 public static class EventUnblockPatch
 {
-    static bool Prepare() => OfflineTakeoverUtility.IsTakeoverEnabled();
+    private static readonly FieldInfo PlayerCollectionField = AccessTools.Field(typeof(EventSynchronizer), "_playerCollection");
+    private static readonly PropertyInfo IsSharedProperty = AccessTools.Property(typeof(EventSynchronizer), "IsShared");
+    private static readonly FieldInfo PlayerVotesField = AccessTools.Field(typeof(EventSynchronizer), "_playerVotes");
+    private static readonly FieldInfo PageIndexField = AccessTools.Field(typeof(EventSynchronizer), "_pageIndex");
+    private static readonly MethodInfo VoteMethod = AccessTools.Method(typeof(EventSynchronizer), "PlayerVotedForSharedOptionIndex");
+    private static readonly FieldInfo EventsField = AccessTools.Field(typeof(EventSynchronizer), "_events");
+    private static readonly MethodInfo ChooseMethod = AccessTools.Method(typeof(EventSynchronizer), "ChooseOptionForEvent");
+
+    static bool Prepare() => OfflineTakeoverCore.IsTakeoverEnabled();
 
     public static void Postfix(EventSynchronizer __instance)
     {
         if (RunManager.Instance.NetService.Type != NetGameType.Host) return;
 
-        var playerCollectionField = AccessTools.Field(typeof(EventSynchronizer), "_playerCollection");
-        var isSharedProperty = AccessTools.Property(typeof(EventSynchronizer), "IsShared");
-        var playerVotesField = AccessTools.Field(typeof(EventSynchronizer), "_playerVotes");
-
-        var playerCollection = playerCollectionField?.GetValue(__instance) as IPlayerCollection;
-        var isShared = isSharedProperty != null && (bool)isSharedProperty.GetValue(__instance)!;
+        var playerCollection = PlayerCollectionField?.GetValue(__instance) as IPlayerCollection;
+        var isShared = IsSharedProperty != null && (bool)IsSharedProperty.GetValue(__instance)!;
 
         if (playerCollection == null) return;
-        if (playerCollection.Players.All(p => OfflineTakeoverUtility.IsGhost(p.NetId))) return;
+        if (playerCollection.Players.All(p => OfflineTakeoverCore.IsGhost(p.NetId))) return;
 
         if (isShared)
         {
-            var playerVotesObj = playerVotesField?.GetValue(__instance);
+            var playerVotesObj = PlayerVotesField?.GetValue(__instance);
             if (playerVotesObj is not IList playerVotes) return;
 
             var allOnlineVoted = true;
@@ -521,7 +563,7 @@ public static class EventUnblockPatch
             for (var i = 0; i < playerCollection.Players.Count; i++)
             {
                 if (i >= playerVotes.Count) break;
-                if (OfflineTakeoverUtility.IsGhost(playerCollection.Players[i].NetId)) continue;
+                if (OfflineTakeoverCore.IsGhost(playerCollection.Players[i].NetId)) continue;
 
                 if (playerVotes[i] is not uint vote) { allOnlineVoted = false; break; }
                 fallbackVote = vote;
@@ -531,36 +573,29 @@ public static class EventUnblockPatch
             for (var i = 0; i < playerCollection.Players.Count; i++)
             {
                 if (i >= playerVotes.Count) break;
-                if (!OfflineTakeoverUtility.IsGhost(playerCollection.Players[i].NetId) || (playerVotes[i] as uint?).HasValue)
+                if (!OfflineTakeoverCore.IsGhost(playerCollection.Players[i].NetId) || (playerVotes[i] as uint?).HasValue)
                     continue;
                 
-                var pageIndexField = AccessTools.Field(typeof(EventSynchronizer), "_pageIndex");
-                var pageIndex = (uint)(pageIndexField?.GetValue(__instance) ?? 0U);
-
-                var voteMethod = AccessTools.Method(typeof(EventSynchronizer), "PlayerVotedForSharedOptionIndex");
-                voteMethod?.Invoke(__instance, [playerCollection.Players[i], fallbackVote.Value, pageIndex]);
+                var pageIndex = (uint)(PageIndexField?.GetValue(__instance) ?? 0U);
+                VoteMethod?.Invoke(__instance, [playerCollection.Players[i], fallbackVote.Value, pageIndex]);
             }
         }
         else
         {
-            var eventsField = AccessTools.Field(typeof(EventSynchronizer), "_events");
-            if (eventsField?.GetValue(__instance) is not List<EventModel> events) return;
+            if (EventsField?.GetValue(__instance) is not List<EventModel> events) return;
 
-            var allOnlineFinished = !playerCollection.Players.Where((t, i) => !OfflineTakeoverUtility.IsGhost(t.NetId) && !events[i].IsFinished).Any();
+            var allOnlineFinished = !playerCollection.Players.Where((t, i) => !OfflineTakeoverCore.IsGhost(t.NetId) && !events[i].IsFinished).Any();
             if (!allOnlineFinished) return;
             
             for (var i = 0; i < playerCollection.Players.Count; i++)
             {
                 var ghostPlayer = playerCollection.Players[i];
-                if (!OfflineTakeoverUtility.IsGhost(ghostPlayer.NetId) || events[i].IsFinished) continue;
+                if (!OfflineTakeoverCore.IsGhost(ghostPlayer.NetId) || events[i].IsFinished) continue;
                 
-                var chooseMethod = AccessTools.Method(typeof(EventSynchronizer), "ChooseOptionForEvent");
                 var safeGuard = 0; 
-                
                 while (events.Count > i && !events[i].IsFinished && events[i].CurrentOptions.Count > 0 && safeGuard < 5)
                 {
-                    Log.Info($"[DirectConnectIP] 正在为离线玩家 {ghostPlayer.NetId} 推进事件选项...");
-                    chooseMethod?.Invoke(__instance, [ghostPlayer, 0]);
+                    ChooseMethod?.Invoke(__instance, [ghostPlayer, 0]);
                     safeGuard++;
                 }
             }
@@ -574,13 +609,11 @@ public static class EventUnblockPatch
 [HarmonyPatch(typeof(PlayerChoiceSynchronizer), nameof(PlayerChoiceSynchronizer.WaitForRemoteChoice))]
 public static class AutoPassRemoteChoiceForGhostsPatch
 {
-    static bool Prepare() => OfflineTakeoverUtility.IsTakeoverEnabled();
+    static bool Prepare() => OfflineTakeoverCore.IsTakeoverEnabled();
 
     public static void Prefix(PlayerChoiceSynchronizer __instance, Player player, uint choiceId)
     {
-        if (!OfflineTakeoverUtility.IsGhost(player.NetId)) return;
-
-        Log.Info($"[DirectConnectIP] 侦测到等待离线玩家 {player.NetId} 的选择，注入默认选项...");
+        if (!OfflineTakeoverCore.IsGhost(player.NetId)) return;
 
         var defaultNetResult = PlayerChoiceResult.FromIndex(0).ToNetData();
         __instance.ReceiveReplayChoice(player, choiceId, defaultNetResult);
@@ -593,7 +626,7 @@ public static class AutoPassRemoteChoiceForGhostsPatch
 [HarmonyPatch(typeof(GodotFileIo), nameof(GodotFileIo.RenameFile))]
 public static class LocalTestingRenameFilePatch
 {
-    static bool Prepare() => OfflineTakeoverUtility.IsTakeoverEnabled();
+    static bool Prepare() => OfflineTakeoverCore.IsTakeoverEnabled();
 
     public static Exception Finalizer(Exception __exception)
     {
@@ -606,7 +639,7 @@ public static class LocalTestingRenameFilePatch
 [HarmonyPatch(typeof(GodotFileIo), nameof(GodotFileIo.WriteFile), typeof(string), typeof(byte[]))]
 public static class LocalTestingWriteFileBytesPatch
 {
-    static bool Prepare() => OfflineTakeoverUtility.IsTakeoverEnabled();
+    static bool Prepare() => OfflineTakeoverCore.IsTakeoverEnabled();
 
     public static Exception Finalizer(Exception __exception)
     {
@@ -619,7 +652,7 @@ public static class LocalTestingWriteFileBytesPatch
 [HarmonyPatch(typeof(GodotFileIo), nameof(GodotFileIo.WriteFile), typeof(string), typeof(string))]
 public static class LocalTestingWriteFileStringPatch
 {
-    static bool Prepare() => OfflineTakeoverUtility.IsTakeoverEnabled();
+    static bool Prepare() => OfflineTakeoverCore.IsTakeoverEnabled();
 
     public static Exception Finalizer(Exception __exception)
     {

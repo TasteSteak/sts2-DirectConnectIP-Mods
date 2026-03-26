@@ -1,21 +1,6 @@
 {
   "MOD_DC_BTN_JOIN.title": "加入服务器",
   "MOD_DC_BTN_JOIN.description": "通过输入 IP 地址连接到好友的自定义服务器。",
-  "MOD_DC_FAQ_TITLE": "常见问题 (FAQ)",
-  "MOD_DC_FAQ_BTN_CLOSE": "我知道了",
-
-  "MOD_DC_FAQ_Q1": "Q1：为什么我会被踢出房间？",
-  "MOD_DC_FAQ_A1": "A：这通常是因为你的玩家 ID 与房主重复了。请在档案设置中更改 ID 为一串新的随机纯数字。",
-  "MOD_DC_FAQ_Q2": "Q2：为什么我遇到了【InternalNetwork】错误？",
-  "MOD_DC_FAQ_A2": "A：可能是模组版本不一致。请确保联机双方都安装了 DirectConnectIP 模组的相同版本，或都更新到最新版本。",
-  "MOD_DC_FAQ_Q3": "Q3：我遇到了其他网络错误，例如【未知错误】，该怎么办？",
-  "MOD_DC_FAQ_A3": "A：请先检查网络稳定性。如果网络和 ID 都没有问题，请联系作者并提供日志。",
-  "MOD_DC_FAQ_Q4": "Q4：为什么我遇到了【连接超时】？",
-  "MOD_DC_FAQ_A4": "A：请确保主机开放了本地端口 33771，且网络传输协议为 UDP，同时检查客户机的网络是否稳定。",
-  "MOD_DC_FAQ_Q5": "Q5：我能够进行跨端联机吗？",
-  "MOD_DC_FAQ_A5": "A：当然可以。只需要保证游戏版本、模组版本完全一致，以及网络通信正常就能联机。",
-  "MOD_DC_FAQ_Q6": "Q6：以上方法仍未解决我的问题，我该如何求助？",
-  "MOD_DC_FAQ_A6": "A：你可以关注我们的视频账号获取联系方式，欢迎随时联系我们求助或反馈。",
 
   "MOD_DC_TITLE_HOST_MODE": "- 请选择建房模式 -",
   "MOD_DC_TOOLTIP_FAQ": "查看常见问题",

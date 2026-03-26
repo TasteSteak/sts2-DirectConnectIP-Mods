@@ -187,6 +187,9 @@ namespace DirectConnectIP.Network
             
             _isConnected = false;
             PlayerNameRegistry.RemoteNames.Clear();
+            
+            _connection?.Flush();
+            _connection?.Destroy();
             _connection = null;
             
             _handler.OnDisconnectedFromHost(_hostNetId, errorInfo);
@@ -208,21 +211,22 @@ namespace DirectConnectIP.Network
                 else
                 {
                     var rawData = packet.AsAppMessage();
-
-                    if (ModPacketRouter.IsModPacket(rawData))
+                    if (data.channel == ModPacketRouter.Channel)
                     {
+                        if (!ModPacketRouter.IsModPacket(rawData)) return;
+                        
                         var modPacket = ModPacketRouter.Deserialize(rawData);
                         if (modPacket != null) HandleModPacket(modPacket);
                         return;
                     }
-
+                    
                     _handler.OnPacketReceived(HostNetId, rawData, data.mode, data.channel);
                 }
             }
             catch (Exception ex) 
-            { 
-                PopupHelper.ShowNetError(new NetErrorInfo(NetError.UnknownNetworkError, false));
-                _logger.Warn($"Client failed to handle incoming packet: {ex.Message}"); 
+            {
+                ModPacketRouter.LogNetworkCrash(ex, data.packetData, "客户端处理网络接收包时发生未捕获异常", data.channel);
+                DisconnectFromHost(NetError.UnknownNetworkError, now: true);
             }
         }
 
@@ -231,7 +235,7 @@ namespace DirectConnectIP.Network
             if (!_isConnected || _peer == null) return;
             var packetData = ModPacketRouter.Serialize(packet);
             var enetPacket = ENetPacket.FromAppMessage(packetData, packetData.Length);
-            _peer.Send(0, enetPacket.AllBytes, ENetUtil.FlagsFromMode(NetTransferMode.Reliable));
+            _peer.Send(ModPacketRouter.Channel, enetPacket.AllBytes, ENetUtil.FlagsFromMode(NetTransferMode.Reliable));
         }
 
         private void HandleModPacket(IModPacket packet)
