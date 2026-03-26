@@ -43,7 +43,6 @@ public static class PlayCardActionGhostPatch
     {
         if (__state != null && __result != null)
         {
-            // 保证卡牌的异步效果（包括弹窗动画等）彻底走完后，才卸下护盾
             __result.ContinueWith(_ => __state.Dispose());
         }
         else
@@ -118,12 +117,10 @@ public static class ConcurrentAutoPlayTurnPatch
                     var playAction = new PlayCardAction(cardToPlay, target);
                     OfflineTakeoverUtility.EnqueueGhostAction(playAction, ghostPlayer.NetId);
 
-                    // 稍作停顿再看下一张牌，让出牌有节奏感
                     await Task.Delay(1200); 
                 }
                 else if (playableCards.Count > 0)
                 {
-                    // 手里还有能打的牌，但全都已经被发包排队了，等待底层动画播完、手牌刷新
                     await Task.Delay(800);
                 }
                 else
