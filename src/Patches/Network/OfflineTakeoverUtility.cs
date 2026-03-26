@@ -10,17 +10,11 @@ using MegaCrit.Sts2.Core.Runs;
 
 namespace DirectConnectIP.Patches.Network;
 
-/// <summary>
-/// 离线接管的公共核心工具类
-/// </summary>
 public static class OfflineTakeoverUtility
 {
     public static bool IsTakeoverEnabled() => ModEntry.Config.EnableOfflineTakeover;
     public static bool IsGhost(ulong netId) => !GetOnlineIds().Contains(netId);
 
-    /// <summary>
-    /// 智能双端获取在线玩家名单
-    /// </summary>
     private static HashSet<ulong> GetOnlineIds()
     {
         var ids = new HashSet<ulong> { ModEntry.Config.LocalPlayerId };
@@ -46,10 +40,6 @@ public static class OfflineTakeoverUtility
         return ids;
     }
 
-    /// <summary>
-    /// 反射强行调用底层队列接口。
-    /// 绕过主机的自动盖章，强行以 ghostNetId 的身份将动作广播给所有客机！
-    /// </summary>
     public static void EnqueueGhostAction(GameAction action, ulong ghostNetId)
     {
         try
