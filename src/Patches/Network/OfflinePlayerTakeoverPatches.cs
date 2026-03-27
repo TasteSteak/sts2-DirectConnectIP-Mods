@@ -8,7 +8,6 @@ using HarmonyLib;
 using MegaCrit.Sts2.Core.Combat;
 using MegaCrit.Sts2.Core.Commands;
 using MegaCrit.Sts2.Core.Entities.Cards;
-using MegaCrit.Sts2.Core.Entities.Creatures;
 using MegaCrit.Sts2.Core.Entities.Multiplayer;
 using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.GameActions;
@@ -18,7 +17,6 @@ using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Models.Relics;
 using MegaCrit.Sts2.Core.Multiplayer;
 using MegaCrit.Sts2.Core.Multiplayer.Game;
-using MegaCrit.Sts2.Core.Multiplayer.Game.PeerInput;
 using MegaCrit.Sts2.Core.Multiplayer.Messages.Game;
 using MegaCrit.Sts2.Core.Runs;
 using MegaCrit.Sts2.Core.Saves;
@@ -106,22 +104,14 @@ public static class ConcurrentAutoPlayTurnPatch
 
                 if (cardToPlay != null)
                 {
-                    Creature target;
-                    switch (cardToPlay.TargetType)
+                    var target = cardToPlay.TargetType switch
                     {
-                        case TargetType.AnyEnemy:
-                            target = combatState.HittableEnemies.FirstOrDefault();
-                            break;
-                        case TargetType.AnyPlayer:
-                            target = ghostPlayer.Creature;
-                            break;
-                        case TargetType.AnyAlly:
-                            target = combatState.Allies.FirstOrDefault(c => c is { IsAlive: true, IsPlayer: true } && c != ghostPlayer.Creature);
-                            break;
-                        default:
-                            target = null; 
-                            break;
-                    }
+                        TargetType.AnyEnemy => combatState.HittableEnemies.Count > 0 ? combatState.HittableEnemies[0] : null,
+                        TargetType.AnyPlayer => ghostPlayer.Creature,
+                        TargetType.AnyAlly => combatState.Allies.FirstOrDefault(c =>
+                            c is { IsAlive: true, IsPlayer: true } && c != ghostPlayer.Creature),
+                        _ => null
+                    };
                     pendingCards.Add(cardToPlay);
                     var playAction = new PlayCardAction(cardToPlay, target);
                     
@@ -386,36 +376,6 @@ public static class TreasureUnblockPatch
             return true;
 
         }
-    }
-}
-
-// ==========================================
-// 幽灵玩家鼠标指针/输入状态
-// ==========================================
-[HarmonyPatch(typeof(PeerInputSynchronizer), "ForceGetStateForPlayer")]
-public static class PeerInputStateGhostPatch
-{
-    private static readonly MethodInfo GetOrCreateMethod = AccessTools.Method(typeof(PeerInputSynchronizer), "GetOrCreateStateForPlayer");
-    static bool Prepare() => OfflineTakeoverCore.IsTakeoverEnabled();
-
-    public static bool Prefix(PeerInputSynchronizer __instance, ulong playerId, ref object __result)
-    {
-        if (!OfflineTakeoverCore.IsGhost(playerId)) return true;
-
-        try
-        {
-            if (GetOrCreateMethod != null)
-            {
-                __result = GetOrCreateMethod.Invoke(__instance, [playerId]);
-                return false;
-            }
-        }
-        catch 
-        {
-            // 静默
-        }
-        
-        return true;
     }
 }
 

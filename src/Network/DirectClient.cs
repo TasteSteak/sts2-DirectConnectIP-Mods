@@ -3,7 +3,6 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
-using DirectConnectIP.Helpers;
 using DirectConnectIP.Network.Packets;
 using DirectConnectIP.Patches.Network;
 using Godot;
@@ -247,11 +246,15 @@ namespace DirectConnectIP.Network
                     foreach (var kvp in fullList.Players)
                         PlayerNameRegistry.RemoteNames[kvp.Key] = kvp.Value;
                     _logger.Info($"[DirectClient] 已同步全员名单，共 {fullList.Players.Count} 人");
+                    
+                    SystemPreheater.PrewarmAllKnownPlayers();
                     break;
 
                 case SyncSinglePacket single:
                     PlayerNameRegistry.RemoteNames[single.PlayerId] = single.PlayerName;
                     _logger.Info($"[DirectClient] 收到新玩家加入消息: {single.PlayerName} (ID: {single.PlayerId})");
+                    
+                    SystemPreheater.PrewarmPlayer(single.PlayerId);
                     break;
 
                 case SyncRemovePacket remove:

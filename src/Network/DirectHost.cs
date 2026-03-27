@@ -227,7 +227,7 @@ public class DirectHost(INetHostHandler handler) : NetHost(handler)
         {
             netId = _hostNetId, status = ENetHandshakeStatus.Success
         });
-        peer.Send(ModPacketRouter.Channel, successResp.AllBytes, 1);
+        peer.Send(0, successResp.AllBytes, 1);
 
         var pending = _pendingHandshakes.FirstOrDefault(p => p.Peer == peer);
         if (pending.Peer == null) 
@@ -236,9 +236,11 @@ public class DirectHost(INetHostHandler handler) : NetHost(handler)
             return;
         }
         _pendingHandshakes.Remove(pending);
-
         _connectedPeers.Add(new ClientConnection { Peer = peer, NetId = clientNetId });
+        
         _handler.OnPeerConnected(clientNetId);
+        SystemPreheater.PrewarmPlayer(clientNetId);
+
         _logger.Debug($"Handshake completed for client {clientNetId}. I am {_hostNetId}");
     }
 

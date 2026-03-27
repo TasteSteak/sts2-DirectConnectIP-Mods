@@ -2,3 +2,14 @@ root = true
 
 [*]
 charset = utf-8
+
+[*.cs]
+dotnet_naming_rule.harmony_magic_args.severity = none
+dotnet_naming_rule.harmony_magic_args.symbols = harmony_args
+dotnet_naming_rule.harmony_magic_args.style = harmony_style
+
+dotnet_naming_symbols.harmony_args.applicable_kinds = parameter
+dotnet_naming_symbols.harmony_args.applicable_accessibilities = *
+
+dotnet_naming_style.harmony_style.required_prefix = __
+dotnet_naming_style.harmony_style.capitalization = camel_case
