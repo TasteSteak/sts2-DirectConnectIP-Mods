@@ -92,10 +92,18 @@ public partial class ProfileSettingsScreen : DirectUiScreen
         label.AddThemeFontSizeOverride("font_size", 16);
         
         input = new LineEdit { 
-            CustomMinimumSize = new Vector2(0, 45), 
-            Alignment = HorizontalAlignment.Center
+            CustomMinimumSize = new Vector2(300, 45), 
+            Alignment = HorizontalAlignment.Center,
+            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
         };
         input.AddThemeFontSizeOverride("font_size", 20);
+        
+        var style = new StyleBoxFlat { 
+            BgColor = new Color(0.15f, 0.15f, 0.15f), 
+            CornerRadiusTopLeft = 4, CornerRadiusTopRight = 4, 
+            CornerRadiusBottomLeft = 4, CornerRadiusBottomRight = 4 
+        };
+        input.AddThemeStyleboxOverride("normal", style);
 
         group.AddChild(label);
         group.AddChild(input);

@@ -123,9 +123,18 @@ public partial class JoinServerScreen(Func<string, bool> onConnectSubmit) : Dire
         var input = new LineEdit { 
             PlaceholderText = "127.0.0.1:33771", 
             Alignment = HorizontalAlignment.Center,
-            CustomMinimumSize = new Vector2(0, 50)
+            CustomMinimumSize = new Vector2(300, 50),
+            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
         };
         input.AddThemeFontSizeOverride("font_size", 24);
+
+        var style = new StyleBoxFlat { 
+            BgColor = new Color(0.15f, 0.15f, 0.15f), 
+            CornerRadiusTopLeft = 4, CornerRadiusTopRight = 4, 
+            CornerRadiusBottomLeft = 4, CornerRadiusBottomRight = 4 
+        };
+        input.AddThemeStyleboxOverride("normal", style);
+
         return input;
     }
 }
