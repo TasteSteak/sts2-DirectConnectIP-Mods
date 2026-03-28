@@ -7,7 +7,7 @@ namespace DirectConnectIP.Network;
 
 public static class ModPacketRouter
 {
-    public const int Channel = 1; 
+    public const int Channel = 15; 
     private static readonly byte[] MagicHeader = "DCIP"u8.ToArray();
     private const byte ProtocolVersion = 1;
 
@@ -80,22 +80,20 @@ public static class ModPacketRouter
             hexDump = BitConverter.ToString(rawData, 0, extractLength);
             if (rawData.Length > 64) hexDump += "...(截断)";
         }
-
-        var sourceStr = channel.HasValue ? channel.Value == Channel ? "[DirectConnectIP 1]" : "[Normal 0]" : "[Unknown]";
             
         var channelInfo = channel.HasValue ? $" (Channel: {channel.Value})" : "";
-        var packetTypeLine = !string.IsNullOrEmpty(packetTypeInfo) ? $"▶ 尝试解析的包类型: {packetTypeInfo}\n" : "";
+        var packetTypeLine = !string.IsNullOrEmpty(packetTypeInfo) ? $" 尝试解析的包类型: {packetTypeInfo}\n" : "";
 
         Log.Error(
             $"[DirectConnectIP] 网络数据包处理发生致命异常！\n" +
             $"--------------------------------------------------\n" +
             $"Error Context: {contextMessage}\n" +
-            $"DataStream: {sourceStr}{channelInfo}\n" +
+            $"DataStream: {channelInfo}\n" +
             packetTypeLine +
             $"DataPack Length: {dataLength} bytes\n" +
             $"(Hex): {hexDump}\n" +
-            $"--------------------------------------------------\n" +
+            "--------------------------------------------------\n" +
             $"StackTrace:\n{ex}\n" +
-            $"--------------------------------------------------");
+            "--------------------------------------------------");
     }
 }

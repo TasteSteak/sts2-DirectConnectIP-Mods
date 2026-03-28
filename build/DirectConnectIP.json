@@ -1,7 +1,7 @@
 {
 "id": "DirectConnectIP",
 "name": "DirectConnectIP",
-"version": "1.2.5",
+"version": "1.2.6",
 "author": "Tasty_Steak",
 "description": "This mod allows direct connection to game rooms via IP address. \n这个模组将提供通过IP地址进行联机的方式。",
 "dependencies": [],

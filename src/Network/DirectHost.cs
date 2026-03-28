@@ -135,14 +135,13 @@ public class DirectHost(INetHostHandler handler) : NetHost(handler)
                     if (conn.HasValue)
                     {
                         var rawData = packet.AsAppMessage();
-                        if (data.channel == 1)
+                        if (data.channel == ModPacketRouter.Channel && ModPacketRouter.IsModPacket(rawData))
                         {
-                            if (!ModPacketRouter.IsModPacket(rawData)) return;
-                            
                             var modPacket = ModPacketRouter.Deserialize(rawData);
                             if (modPacket != null) HandleModPacket(conn.Value.NetId, modPacket);
-                            return;
+                            return; 
                         }
+                        
                         _handler.OnPacketReceived(conn.Value.NetId, rawData, data.mode, data.channel);
                     }
                     else { _logger.Error("Received non-handshake packet from unknown peer"); }

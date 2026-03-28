@@ -210,10 +210,8 @@ namespace DirectConnectIP.Network
                 else
                 {
                     var rawData = packet.AsAppMessage();
-                    if (data.channel == ModPacketRouter.Channel)
+                    if (data.channel == ModPacketRouter.Channel && ModPacketRouter.IsModPacket(rawData))
                     {
-                        if (!ModPacketRouter.IsModPacket(rawData)) return;
-                        
                         var modPacket = ModPacketRouter.Deserialize(rawData);
                         if (modPacket != null) HandleModPacket(modPacket);
                         return;
@@ -237,7 +235,7 @@ namespace DirectConnectIP.Network
             _peer.Send(ModPacketRouter.Channel, enetPacket.AllBytes, ENetUtil.FlagsFromMode(NetTransferMode.Reliable));
         }
 
-        private void HandleModPacket(IModPacket packet)
+        private static void HandleModPacket(IModPacket packet)
         {
             switch (packet)
             {
@@ -245,21 +243,18 @@ namespace DirectConnectIP.Network
                     PlayerNameRegistry.RemoteNames.Clear();
                     foreach (var kvp in fullList.Players)
                         PlayerNameRegistry.RemoteNames[kvp.Key] = kvp.Value;
-                    _logger.Info($"[DirectClient] 已同步全员名单，共 {fullList.Players.Count} 人");
                     
                     SystemPreheater.PrewarmAllKnownPlayers();
                     break;
 
                 case SyncSinglePacket single:
                     PlayerNameRegistry.RemoteNames[single.PlayerId] = single.PlayerName;
-                    _logger.Info($"[DirectClient] 收到新玩家加入消息: {single.PlayerName} (ID: {single.PlayerId})");
                     
                     SystemPreheater.PrewarmPlayer(single.PlayerId);
                     break;
 
                 case SyncRemovePacket remove:
-                    if (PlayerNameRegistry.RemoteNames.Remove(remove.PlayerId))
-                        _logger.Info($"[DirectClient] 玩家离开，已移除名字缓存 (ID: {remove.PlayerId})");
+                    PlayerNameRegistry.RemoteNames.Remove(remove.PlayerId);
                     break;
             }
         }

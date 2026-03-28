@@ -1,8 +1,10 @@
 ﻿#nullable enable
 using System.Reflection;
 using HarmonyLib;
+using Godot;
 using MegaCrit.Sts2.Core.Multiplayer.Game;
 using MegaCrit.Sts2.Core.Multiplayer.Game.PeerInput;
+using MegaCrit.Sts2.Core.Nodes.Multiplayer;
 
 namespace DirectConnectIP.Patches.Network;
 
@@ -82,5 +84,36 @@ public static class PeerInputStateGhostPatch
             // 静默
         }
         return true;
+    }
+}
+
+// ==========================================
+// 拦截官方 UI 渲染层过早收到鼠标数据时的空指针崩溃
+// ==========================================
+[HarmonyPatch(typeof(NRemoteMouseCursorContainer), "OnInputStateChanged")]
+public static class RemoteMouseCursorFailsafePatch
+{
+    private static readonly MethodInfo? GetCursorMethod = AccessTools.Method(typeof(NRemoteMouseCursorContainer), "GetCursor");
+    private static readonly MethodInfo? AddCursorMethod = AccessTools.Method(typeof(NRemoteMouseCursorContainer), "AddCursor");
+
+    public static bool Prefix(NRemoteMouseCursorContainer __instance, ulong playerId)
+    {
+        try
+        {
+            if (!GodotObject.IsInstanceValid(__instance) || !__instance.IsInsideTree()) return false;
+            if (GetCursorMethod == null || AddCursorMethod == null) return true;
+            
+            var cursor = GetCursorMethod.Invoke(__instance, [playerId]);
+            if (cursor != null) return true;
+            
+            AddCursorMethod.Invoke(__instance, [playerId]);
+            cursor = GetCursorMethod.Invoke(__instance, [playerId]);
+            
+            return cursor != null;
+        }
+        catch
+        {
+            return false;
+        }
     }
 }
