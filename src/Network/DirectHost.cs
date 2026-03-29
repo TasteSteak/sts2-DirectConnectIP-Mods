@@ -46,6 +46,7 @@ public class DirectHost(INetHostHandler handler) : NetHost(handler)
         }
     
         _isConnected = true;
+        OfflineTakeoverCore.IsDirectConnectActive = true;
         _logger.Info($"DirectHost started on port {port} with ID {hostNetId}");
         return null;
     }
@@ -299,6 +300,7 @@ public class DirectHost(INetHostHandler handler) : NetHost(handler)
             _connection = null;
         }
         _isConnected = false;
+        OfflineTakeoverCore.IsDirectConnectActive = false;
         _handler.OnDisconnected(new NetErrorInfo(reason, true));
     }
 

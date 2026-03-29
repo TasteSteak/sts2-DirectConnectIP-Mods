@@ -15,7 +15,10 @@ namespace DirectConnectIP.Patches.Network;
 public static class OfflineTakeoverCore
 {
     private static readonly MethodInfo EnqueueActionMethod = AccessTools.Method(typeof(ActionQueueSynchronizer), "EnqueueAction");
-    public static bool IsTakeoverEnabled() => ModEntry.Config is { EnableOfflineTakeover: true };
+
+    public static bool IsTakeoverConfigEnabled() => ModEntry.Config is { EnableOfflineTakeover: true };
+    
+    public static bool IsDirectConnectActive { get; set; }
 
     public static bool IsGhost(ulong netId)
     {

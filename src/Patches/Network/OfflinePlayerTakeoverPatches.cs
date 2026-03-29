@@ -1,4 +1,5 @@
-﻿using System;
+﻿#nullable enable
+using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Linq;
@@ -27,19 +28,23 @@ namespace DirectConnectIP.Patches.Network;
 [HarmonyPatch(typeof(PlayCardAction), "ExecuteAction")]
 public static class PlayCardActionGhostPatch
 {
-    static bool Prepare() => OfflineTakeoverCore.IsTakeoverEnabled();
+    static bool Prepare() => OfflineTakeoverCore.IsTakeoverConfigEnabled();
 
-    public static void Prefix(PlayCardAction __instance, out IDisposable __state)
+    public static void Prefix(PlayCardAction __instance, out IDisposable? __state)
     {
         __state = null;
+        if (!OfflineTakeoverCore.IsDirectConnectActive) return;
+
         if (OfflineTakeoverCore.IsGhost(__instance.OwnerId))
         {
             __state = CardSelectCmd.PushSelector(new VakuuCardSelector());
         }
     }
 
-    public static void Postfix(Task __result, IDisposable __state)
+    public static void Postfix(Task? __result, IDisposable? __state)
     {
+        if (!OfflineTakeoverCore.IsDirectConnectActive) return;
+
         if (__state != null && __result != null)
         {
             if (System.Threading.SynchronizationContext.Current != null)
@@ -65,10 +70,11 @@ public static class PlayCardActionGhostPatch
 public static class ConcurrentAutoPlayTurnPatch
 {
     private static readonly HashSet<ulong> ActiveAiTasks = [];
-    static bool Prepare() => OfflineTakeoverCore.IsTakeoverEnabled();
+    static bool Prepare() => OfflineTakeoverCore.IsTakeoverConfigEnabled();
 
     public static void Postfix(ActionQueueSynchronizer __instance, ActionSynchronizerCombatState combatState)
     {
+        if (!OfflineTakeoverCore.IsDirectConnectActive) return;
         if (RunManager.Instance.NetService.Type != NetGameType.Host) return;
         if (combatState != ActionSynchronizerCombatState.PlayPhase) return;
         
@@ -93,6 +99,8 @@ public static class ConcurrentAutoPlayTurnPatch
             var pendingCards = new HashSet<CardModel>();
             while (RunManager.Instance.IsInProgress && CombatManager.Instance.IsInProgress)
             {
+                if (!OfflineTakeoverCore.IsDirectConnectActive) break; 
+
                 var combatState = ghostPlayer.Creature.CombatState;
                 if (combatState == null || combatState.RoundNumber != roundNumber) break;
                 if (CombatManager.Instance.IsPlayerReadyToEndTurn(ghostPlayer)) break;
@@ -151,12 +159,13 @@ public static class ConcurrentAutoPlayTurnPatch
 [HarmonyPatch(typeof(ActionQueueSynchronizer), nameof(ActionQueueSynchronizer.SetCombatState))]
 public static class AutoReadyEnemyTurnPatch
 {
-    private static readonly FieldInfo ReadyPlayersField = AccessTools.Field(typeof(CombatManager), "_playersReadyToBeginEnemyTurn");
+    private static readonly FieldInfo? ReadyPlayersField = AccessTools.Field(typeof(CombatManager), "_playersReadyToBeginEnemyTurn");
 
-    static bool Prepare() => OfflineTakeoverCore.IsTakeoverEnabled();
+    static bool Prepare() => OfflineTakeoverCore.IsTakeoverConfigEnabled();
 
     public static void Postfix(ActionQueueSynchronizer __instance, ActionSynchronizerCombatState combatState)
     {
+        if (!OfflineTakeoverCore.IsDirectConnectActive) return;
         if (RunManager.Instance.NetService.Type != NetGameType.Host) return;
         
         if (combatState != ActionSynchronizerCombatState.EndTurnPhaseOne) return;
@@ -182,10 +191,11 @@ public static class AutoReadyEnemyTurnPatch
 [HarmonyPatch(typeof(CombatManager), nameof(CombatManager.SetReadyToEndTurn))]
 public static class CombatTurnEndTakeoverPatch
 {
-    static bool Prepare() => OfflineTakeoverCore.IsTakeoverEnabled();
+    static bool Prepare() => OfflineTakeoverCore.IsTakeoverConfigEnabled();
 
     public static void Postfix(CombatManager __instance, Player player)
     {
+        if (!OfflineTakeoverCore.IsDirectConnectActive) return;
         if (RunManager.Instance.NetService.Type != NetGameType.Host) return;
 
         var state = __instance.DebugOnlyGetState();
@@ -207,12 +217,13 @@ public static class CombatTurnEndTakeoverPatch
 [HarmonyPatch(typeof(CombatManager), nameof(CombatManager.SetReadyToBeginEnemyTurn))]
 public static class SetReadyToBeginEnemyTakeoverPatch
 {
-    private static readonly FieldInfo ReadyPlayersField = AccessTools.Field(typeof(CombatManager), "_playersReadyToBeginEnemyTurn");
+    private static readonly FieldInfo? ReadyPlayersField = AccessTools.Field(typeof(CombatManager), "_playersReadyToBeginEnemyTurn");
 
-    static bool Prepare() => OfflineTakeoverCore.IsTakeoverEnabled();
+    static bool Prepare() => OfflineTakeoverCore.IsTakeoverConfigEnabled();
 
     public static void Postfix(CombatManager __instance, Player player)
     {
+        if (!OfflineTakeoverCore.IsDirectConnectActive) return;
         if (RunManager.Instance.NetService.Type != NetGameType.Host) return;
 
         if (ReadyPlayersField?.GetValue(__instance) is not HashSet<Player> readySet) return;
@@ -238,13 +249,14 @@ public static class SetReadyToBeginEnemyTakeoverPatch
 [HarmonyPatch(typeof(MapSelectionSynchronizer), nameof(MapSelectionSynchronizer.PlayerVotedForMapCoord))]
 public static class MapSelectionGhostPatch
 {
-    private static readonly FieldInfo VotesField = AccessTools.Field(typeof(MapSelectionSynchronizer), "_votes");
-    private static readonly MethodInfo MoveMethod = AccessTools.Method(typeof(MapSelectionSynchronizer), "MoveToMapCoord");
+    private static readonly FieldInfo? VotesField = AccessTools.Field(typeof(MapSelectionSynchronizer), "_votes");
+    private static readonly MethodInfo? MoveMethod = AccessTools.Method(typeof(MapSelectionSynchronizer), "MoveToMapCoord");
 
-    static bool Prepare() => OfflineTakeoverCore.IsTakeoverEnabled();
+    static bool Prepare() => OfflineTakeoverCore.IsTakeoverConfigEnabled();
 
     public static void Postfix(MapSelectionSynchronizer __instance)
     {
+        if (!OfflineTakeoverCore.IsDirectConnectActive) return;
         if (RunManager.Instance.NetService.Type != NetGameType.Host) return;
         if (VotesField?.GetValue(__instance) is not IList votesList) return;
 
@@ -284,17 +296,18 @@ public static class MapSelectionGhostPatch
 [HarmonyPatch(typeof(TreasureRoomRelicSynchronizer), nameof(TreasureRoomRelicSynchronizer.OnPicked))]
 public static class TreasureUnblockPatch
 {
-    private static readonly FieldInfo PlayerCollectionField = AccessTools.Field(typeof(TreasureRoomRelicSynchronizer), "_playerCollection");
-    private static readonly FieldInfo VotesField = AccessTools.Field(typeof(TreasureRoomRelicSynchronizer), "_votes");
-    private static readonly FieldInfo CurrentRelicsField = AccessTools.Field(typeof(TreasureRoomRelicSynchronizer), "_currentRelics");
+    private static readonly FieldInfo? PlayerCollectionField = AccessTools.Field(typeof(TreasureRoomRelicSynchronizer), "_playerCollection");
+    private static readonly FieldInfo? VotesField = AccessTools.Field(typeof(TreasureRoomRelicSynchronizer), "_votes");
+    private static readonly FieldInfo? CurrentRelicsField = AccessTools.Field(typeof(TreasureRoomRelicSynchronizer), "_currentRelics");
     
-    private static FieldInfo _voteReceivedField;
-    private static FieldInfo _voteIndexField;
+    private static FieldInfo? _voteReceivedField;
+    private static FieldInfo? _voteIndexField;
 
-    static bool Prepare() => OfflineTakeoverCore.IsTakeoverEnabled();
+    static bool Prepare() => OfflineTakeoverCore.IsTakeoverConfigEnabled();
 
     public static void Postfix(TreasureRoomRelicSynchronizer __instance, Player player)
     {
+        if (!OfflineTakeoverCore.IsDirectConnectActive) return;
         if (RunManager.Instance.NetService.Type != NetGameType.Host) return;
 
         var playerCollection = PlayerCollectionField?.GetValue(__instance) as IPlayerCollection;
@@ -340,19 +353,19 @@ public static class TreasureUnblockPatch
             GameAction pickAction;
             try 
             {
-                pickAction = (GameAction)Activator.CreateInstance(typeof(PickRelicAction), ghostPlayer, (int?)pickIndex);
+                pickAction = (GameAction)Activator.CreateInstance(typeof(PickRelicAction), ghostPlayer, (int?)pickIndex)!;
             }
             catch
             {
-                pickAction = (GameAction)Activator.CreateInstance(typeof(PickRelicAction), ghostPlayer, pickIndex);
+                pickAction = (GameAction)Activator.CreateInstance(typeof(PickRelicAction), ghostPlayer, pickIndex)!;
             }
 
-            if (pickAction != null) OfflineTakeoverCore.EnqueueGhostAction(pickAction, ghostPlayer.NetId);
+            OfflineTakeoverCore.EnqueueGhostAction(pickAction, ghostPlayer.NetId);
         }
 
         return;
 
-        bool HasVoted(object voteObj, out int? votedIndex)
+        bool HasVoted(object? voteObj, out int? votedIndex)
         {
             votedIndex = null;
             if (voteObj == null) return false;
@@ -385,13 +398,14 @@ public static class TreasureUnblockPatch
 [HarmonyPatch(typeof(ActChangeSynchronizer), nameof(ActChangeSynchronizer.OnPlayerReady))]
 public static class ActChangeGhostPatch
 {
-    private static readonly FieldInfo RunStateField = AccessTools.Field(typeof(ActChangeSynchronizer), "_runState");
-    private static readonly FieldInfo ReadyPlayersField = AccessTools.Field(typeof(ActChangeSynchronizer), "_readyPlayers");
+    private static readonly FieldInfo? RunStateField = AccessTools.Field(typeof(ActChangeSynchronizer), "_runState");
+    private static readonly FieldInfo? ReadyPlayersField = AccessTools.Field(typeof(ActChangeSynchronizer), "_readyPlayers");
 
-    static bool Prepare() => OfflineTakeoverCore.IsTakeoverEnabled();
+    static bool Prepare() => OfflineTakeoverCore.IsTakeoverConfigEnabled();
 
     public static void Postfix(ActChangeSynchronizer __instance, Player player)
     {
+        if (!OfflineTakeoverCore.IsDirectConnectActive) return;
         if (RunManager.Instance.NetService.Type != NetGameType.Host) return;
         if (RunStateField?.GetValue(__instance) is not RunState state) return;
         if (state.Players.All(p => OfflineTakeoverCore.IsGhost(p.NetId))) return;
@@ -418,15 +432,16 @@ public static class ActChangeGhostPatch
 [HarmonyPatch(typeof(CombatStateSynchronizer), nameof(CombatStateSynchronizer.StartSync))]
 public static class CombatSyncTakeoverPatch
 {
-    private static readonly FieldInfo NetServiceField = AccessTools.Field(typeof(CombatStateSynchronizer), "_netService");
-    private static readonly FieldInfo RunStateField = AccessTools.Field(typeof(CombatStateSynchronizer), "_runState");
-    private static readonly FieldInfo SyncDataField = AccessTools.Field(typeof(CombatStateSynchronizer), "_syncData");
-    private static readonly MethodInfo CheckSyncMethod = AccessTools.Method(typeof(CombatStateSynchronizer), "CheckSyncCompleted");
+    private static readonly FieldInfo? NetServiceField = AccessTools.Field(typeof(CombatStateSynchronizer), "_netService");
+    private static readonly FieldInfo? RunStateField = AccessTools.Field(typeof(CombatStateSynchronizer), "_runState");
+    private static readonly FieldInfo? SyncDataField = AccessTools.Field(typeof(CombatStateSynchronizer), "_syncData");
+    private static readonly MethodInfo? CheckSyncMethod = AccessTools.Method(typeof(CombatStateSynchronizer), "CheckSyncCompleted");
 
-    static bool Prepare() => OfflineTakeoverCore.IsTakeoverEnabled();
+    static bool Prepare() => OfflineTakeoverCore.IsTakeoverConfigEnabled();
 
     public static void Postfix(CombatStateSynchronizer __instance)
     {
+        if (!OfflineTakeoverCore.IsDirectConnectActive) return;
         if (NetServiceField?.GetValue(__instance) is not INetGameService { Type: NetGameType.Host } netService) return;
 
         var runState = RunStateField?.GetValue(__instance) as RunState;
@@ -458,17 +473,17 @@ public static class CombatSyncTakeoverPatch
 [HarmonyPatch(typeof(CombatStateSynchronizer), "OnSyncPlayerMessageReceived")]
 public static class CombatSyncReceiveTakeoverPatch
 {
-    private static readonly FieldInfo SyncDataField = AccessTools.Field(typeof(CombatStateSynchronizer), "_syncData");
-    private static readonly MethodInfo CheckSyncMethod = AccessTools.Method(typeof(CombatStateSynchronizer), "CheckSyncCompleted");
+    private static readonly FieldInfo? SyncDataField = AccessTools.Field(typeof(CombatStateSynchronizer), "_syncData");
+    private static readonly MethodInfo? CheckSyncMethod = AccessTools.Method(typeof(CombatStateSynchronizer), "CheckSyncCompleted");
 
-    static bool Prepare() => OfflineTakeoverCore.IsTakeoverEnabled();
+    static bool Prepare() => OfflineTakeoverCore.IsTakeoverConfigEnabled();
 
     public static bool Prefix(CombatStateSynchronizer __instance, SyncPlayerDataMessage syncMessage, ulong senderId)
     {
+        if (!OfflineTakeoverCore.IsDirectConnectActive) return true;
+        
         var realPlayerId = syncMessage.player.NetId;
-
         if (realPlayerId == senderId) return true;
-
         if (SyncDataField?.GetValue(__instance) is not Dictionary<ulong, SerializablePlayer> syncData) return false;
         
         syncData[realPlayerId] = syncMessage.player;
@@ -492,18 +507,19 @@ public static class CombatSyncReceiveTakeoverPatch
 [HarmonyPatch(typeof(EventSynchronizer), "PlayerVotedForSharedOptionIndex")]
 public static class EventUnblockPatch
 {
-    private static readonly FieldInfo PlayerCollectionField = AccessTools.Field(typeof(EventSynchronizer), "_playerCollection");
-    private static readonly PropertyInfo IsSharedProperty = AccessTools.Property(typeof(EventSynchronizer), "IsShared");
-    private static readonly FieldInfo PlayerVotesField = AccessTools.Field(typeof(EventSynchronizer), "_playerVotes");
-    private static readonly FieldInfo PageIndexField = AccessTools.Field(typeof(EventSynchronizer), "_pageIndex");
-    private static readonly MethodInfo VoteMethod = AccessTools.Method(typeof(EventSynchronizer), "PlayerVotedForSharedOptionIndex");
-    private static readonly FieldInfo EventsField = AccessTools.Field(typeof(EventSynchronizer), "_events");
-    private static readonly MethodInfo ChooseMethod = AccessTools.Method(typeof(EventSynchronizer), "ChooseOptionForEvent");
+    private static readonly FieldInfo? PlayerCollectionField = AccessTools.Field(typeof(EventSynchronizer), "_playerCollection");
+    private static readonly PropertyInfo? IsSharedProperty = AccessTools.Property(typeof(EventSynchronizer), "IsShared");
+    private static readonly FieldInfo? PlayerVotesField = AccessTools.Field(typeof(EventSynchronizer), "_playerVotes");
+    private static readonly FieldInfo? PageIndexField = AccessTools.Field(typeof(EventSynchronizer), "_pageIndex");
+    private static readonly MethodInfo? VoteMethod = AccessTools.Method(typeof(EventSynchronizer), "PlayerVotedForSharedOptionIndex");
+    private static readonly FieldInfo? EventsField = AccessTools.Field(typeof(EventSynchronizer), "_events");
+    private static readonly MethodInfo? ChooseMethod = AccessTools.Method(typeof(EventSynchronizer), "ChooseOptionForEvent");
 
-    static bool Prepare() => OfflineTakeoverCore.IsTakeoverEnabled();
+    static bool Prepare() => OfflineTakeoverCore.IsTakeoverConfigEnabled();
 
     public static void Postfix(EventSynchronizer __instance)
     {
+        if (!OfflineTakeoverCore.IsDirectConnectActive) return;
         if (RunManager.Instance.NetService.Type != NetGameType.Host) return;
 
         var playerCollection = PlayerCollectionField?.GetValue(__instance) as IPlayerCollection;
@@ -569,10 +585,11 @@ public static class EventUnblockPatch
 [HarmonyPatch(typeof(PlayerChoiceSynchronizer), nameof(PlayerChoiceSynchronizer.WaitForRemoteChoice))]
 public static class AutoPassRemoteChoiceForGhostsPatch
 {
-    static bool Prepare() => OfflineTakeoverCore.IsTakeoverEnabled();
+    static bool Prepare() => OfflineTakeoverCore.IsTakeoverConfigEnabled();
 
     public static void Prefix(PlayerChoiceSynchronizer __instance, Player player, uint choiceId)
     {
+        if (!OfflineTakeoverCore.IsDirectConnectActive) return;
         if (!OfflineTakeoverCore.IsGhost(player.NetId)) return;
 
         var defaultNetResult = PlayerChoiceResult.FromIndex(0).ToNetData();
@@ -586,11 +603,12 @@ public static class AutoPassRemoteChoiceForGhostsPatch
 [HarmonyPatch(typeof(GodotFileIo), nameof(GodotFileIo.RenameFile))]
 public static class LocalTestingRenameFilePatch
 {
-    static bool Prepare() => OfflineTakeoverCore.IsTakeoverEnabled();
+    static bool Prepare() => OfflineTakeoverCore.IsTakeoverConfigEnabled();
 
-    public static Exception Finalizer(Exception __exception)
+    public static Exception? Finalizer(Exception? __exception)
     {
-        if (__exception == null || !__exception.GetType().Name.Contains("SaveException")) return __exception;
+        if (!OfflineTakeoverCore.IsDirectConnectActive || __exception == null || !__exception.GetType().Name.Contains("SaveException")) return __exception;
+        
         Log.Warn($"[DirectConnectIP] 拦截了双开重命名冲突");
         return null;
     }
@@ -599,11 +617,12 @@ public static class LocalTestingRenameFilePatch
 [HarmonyPatch(typeof(GodotFileIo), nameof(GodotFileIo.WriteFile), typeof(string), typeof(byte[]))]
 public static class LocalTestingWriteFileBytesPatch
 {
-    static bool Prepare() => OfflineTakeoverCore.IsTakeoverEnabled();
+    static bool Prepare() => OfflineTakeoverCore.IsTakeoverConfigEnabled();
 
-    public static Exception Finalizer(Exception __exception)
+    public static Exception? Finalizer(Exception? __exception)
     {
-        if (__exception == null || !__exception.GetType().Name.Contains("SaveException")) return __exception;
+        if (!OfflineTakeoverCore.IsDirectConnectActive || __exception == null || !__exception.GetType().Name.Contains("SaveException")) return __exception;
+        
         Log.Warn($"[DirectConnectIP] 拦截了双开字节写入冲突");
         return null;
     }
@@ -612,11 +631,12 @@ public static class LocalTestingWriteFileBytesPatch
 [HarmonyPatch(typeof(GodotFileIo), nameof(GodotFileIo.WriteFile), typeof(string), typeof(string))]
 public static class LocalTestingWriteFileStringPatch
 {
-    static bool Prepare() => OfflineTakeoverCore.IsTakeoverEnabled();
+    static bool Prepare() => OfflineTakeoverCore.IsTakeoverConfigEnabled();
 
-    public static Exception Finalizer(Exception __exception)
+    public static Exception? Finalizer(Exception? __exception)
     {
-        if (__exception == null || !__exception.GetType().Name.Contains("SaveException")) return __exception;
+        if (!OfflineTakeoverCore.IsDirectConnectActive || __exception == null || !__exception.GetType().Name.Contains("SaveException")) return __exception;
+        
         Log.Warn($"[DirectConnectIP] 拦截了双开文本写入冲突");
         return null;
     }

@@ -75,6 +75,7 @@ namespace DirectConnectIP.Network
 
             _hostNetId = response.Value.netId;
             _isConnected = true;
+            OfflineTakeoverCore.IsDirectConnectActive = true;
             _handler.OnConnectedToHost();
             
             var fullAddr = $"{ip}:{port}";
@@ -185,6 +186,7 @@ namespace DirectConnectIP.Network
             if (!_isConnected) return;
             
             _isConnected = false;
+            OfflineTakeoverCore.IsDirectConnectActive = false;
             PlayerNameRegistry.RemoteNames.Clear();
             
             _connection?.Flush();
@@ -272,6 +274,7 @@ namespace DirectConnectIP.Network
             if (!_isConnected && _connection == null) return;
             
             _isConnected = false;
+            OfflineTakeoverCore.IsDirectConnectActive = false;
             PlayerNameRegistry.RemoteNames.Clear(); 
             try
             {
