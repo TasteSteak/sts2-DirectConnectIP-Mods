@@ -35,7 +35,8 @@ This mod adds low-level Direct IP connection functionality to *Slay the Spire 2*
 
 * **Direct IP Support:** Establish P2P or Client-Server connections directly via IPv4/IPv6 addresses (and ports).
 * **Low-Latency Sync:** Designed for players with poor network environments or matchmaking difficulties, providing a more stable underlying connection.
-* **Offline Player Takeover:** No need to restart if someone disconnects! The system will automatically take over the disconnected player's character until their network recovers and they reconnect.
+* **Offline Player Takeover:** No need to restart if someone disconnects! The system can take over disconnected players and restore rejoining players from the host's authoritative game state.
+* **Mod Settings:** Configure your Player Name, Player ID, Offline Takeover Mode, and Community Mobile Port Compatibility from the in-game settings panel.
 * **Virtual LAN Friendly:** Perfectly compatible with various port forwarding and Virtual LAN (VLAN) tools.
 
 ---
@@ -56,15 +57,15 @@ This mod adds low-level Direct IP connection functionality to *Slay the Spire 2*
 1. Click "Create Room" on the main menu, and a multiplayer mode selection will pop up.
 2. If your friends are on an external network, share your **Public IP** (or VLAN IP) with them.
 3. The default local listening port is **UDP 33771**.
-4. Your Player Name and Player ID are inherited from Steam by default, but you can customize them in the mod's UI.
+4. Your Player Name and Player ID are inherited from Steam by default, but you can customize them from **Mod Settings**.
 
 **As a Client:**
 1. Click "Join Server" (or Join Room) on the main menu.
 2. Enter the IP address provided by the host in the pop-up input box (e.g., `abc.example.com:9567` or `192.168.1.100:33771`).
 3. Click Connect to enter the lobby. Upon successful connection, the IP will be saved automatically for a quick one-click connection next time.
-4. Your Player Name and Player ID are inherited from Steam by default, but you can customize them in the mod's UI.
+4. Your Player Name and Player ID are inherited from Steam by default, but you can customize them from **Mod Settings**.
 
-> **Tip:** The mod configuration is automatically saved to the Godot user directory at `user://mods/DirectConnectIP/config.ini`.
+> **Tip:** The mod configuration is automatically saved to the Godot user directory at `user://mods/DirectConnectIP/config.ini`. Changes to Offline Takeover Mode and Community Mobile Port Compatibility require restarting the game.
 
 ---
 
@@ -82,9 +83,9 @@ LocalPlayerId=123456
 # Feature Settings
 [Features]
 
-# Enable offline player takeover mode (Default: true)
+# Offline Takeover Mode (Default: true, requires game restart)
 EnableOfflineTakeover=true
-# Enable compatibility fix for unofficial Android ports (Default: true)
+# Community Mobile Port Compatibility (Default: true, requires game restart)
 EnableAndroidCompatFix=true
 
 # Successfully connected IP addresses (Used for history display only)
