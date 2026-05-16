@@ -62,12 +62,19 @@ public static class PeerInputSynchronizerDisposePatch
 
 // ==========================================
 // 全局玩家鼠标指针/输入状态
+//
+// 旧版游戏中 ForceGetStateForPlayer 在状态缺失时会抛异常，
+// 新版 0105 已移除该方法并让 GetStateForPlayer 返回 null。
+// 因此这里只在旧版方法存在时应用兜底补丁，新版安全跳过。
 // ==========================================
-[HarmonyPatch(typeof(PeerInputSynchronizer), "ForceGetStateForPlayer")]
+[HarmonyPatch]
 public static class PeerInputStateGhostPatch
 {
+    private static readonly MethodInfo? ForceGetMethod = AccessTools.Method(typeof(PeerInputSynchronizer), "ForceGetStateForPlayer");
     private static readonly MethodInfo? GetOrCreateMethod = AccessTools.Method(typeof(PeerInputSynchronizer), "GetOrCreateStateForPlayer");
-    static bool Prepare() => true;
+
+    static bool Prepare() => ForceGetMethod != null && GetOrCreateMethod != null;
+    static MethodBase? TargetMethod() => ForceGetMethod;
 
     public static bool Prefix(PeerInputSynchronizer __instance, ulong playerId, ref object __result)
     {
