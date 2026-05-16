@@ -1,3 +1,7 @@
+### v1.3.1
+* 修复新版游戏中 `PeerInputSynchronizer.ForceGetStateForPlayer` 被移除后，旧输入状态兜底补丁启动时报错的问题。
+* 更新 README、README_CN 与模组元数据版本号到 1.3.1。
+
 ### v1.3.0
 * 适配新版游戏依赖，更新构建引用到 `lib/0105`，并同步生成 `DirectConnectIP.json`、`mod_manifest.json` 与打包产物版本号。
 * 修复离线托管场景下玩家网络波动后可能出现的数据不同步问题。托管推进过状态后，重连玩家会通过房主权威快照恢复到当前游戏状态，避免旧状态客户端继续参与导致对局中断。
