@@ -7,7 +7,7 @@
   "MOD_DC_BTN_STEAM": "Steam 模式",
   "MOD_DC_BTN_ENET": "IP 直连模式",
   "MOD_DC_ERR_STEAM": "未检测到 Steam 环境，该模式不可用",
-  "MOD_DC_BTN_PROFILE": "修改个人信息 (名称/ID)",
+  "MOD_DC_BTN_PROFILE": "模组设置",
   "MOD_DC_BTN_CANCEL": "取消",
   "MOD_DC_TITLE_JOIN_SERVER": "加入自定义服务器",
   "MOD_DC_PLACEHOLDER_IP": "输入服务器 IP 或域名",
@@ -18,9 +18,12 @@
   "MOD_DC_LOADING_CONNECTING": "正在连接至\n{0}",
   "MOD_DC_BTN_CANCEL_CONNECTION": "取消连接",
 
-  "MOD_DC_PROFILE_TITLE": "档案设置",
+  "MOD_DC_PROFILE_TITLE": "模组设置",
   "MOD_DC_PROFILE_NAME_LABEL": "玩家名称:",
   "MOD_DC_PROFILE_ID_LABEL": "玩家 ID:",
+  "MOD_DC_PROFILE_RESTART_SECTION": "需要重启游戏生效项：",
+  "MOD_DC_PROFILE_OFFLINE_TAKEOVER_LABEL": "离线托管模式",
+  "MOD_DC_PROFILE_ANDROID_COMPAT_LABEL": "兼容社区移动端移植版",
   "MOD_DC_PROFILE_WARNING": "注意：请勿随意更改 ID！\n它将作为存档的唯一标识符。如果在游玩中途更改，会导致联机存档读取失败或无法重连！",
   "MOD_DC_BTN_SAVE": "保存",
   "MOD_DC_BTN_RETURN": "返回",
@@ -28,5 +31,5 @@
   "MOD_DC_ERR_INVALID_ID": "无效 ID！",
 
   "MOD_DC_ERR_ID_COLLISION_TITLE": "连接失败",
-  "MOD_DC_ERR_ID_COLLISION_DESC": "你的玩家ID与房间内的玩家重复了！\n\n请去档案设置中，将你的玩家ID改为其它数字试试。"
+  "MOD_DC_ERR_ID_COLLISION_DESC": "你的玩家ID与房间内的玩家重复了！\n\n请去模组设置中，将你的玩家ID改为其它数字试试。"
 }

@@ -109,6 +109,11 @@ namespace DirectConnectIP.Helpers
         
         public void UpdateProfile(string name, ulong newId)
         {
+            UpdateSettings(name, newId, EnableOfflineTakeover, EnableAndroidCompatFix);
+        }
+
+        public void UpdateSettings(string name, ulong newId, bool enableOfflineTakeover, bool enableAndroidCompatFix)
+        {
             var changed = false;
             if (!string.IsNullOrWhiteSpace(name) && name != LocalPlayerName)
             {
@@ -118,6 +123,16 @@ namespace DirectConnectIP.Helpers
             if (newId != LocalPlayerId)
             {
                 LocalPlayerId = newId;
+                changed = true;
+            }
+            if (enableOfflineTakeover != EnableOfflineTakeover)
+            {
+                EnableOfflineTakeover = enableOfflineTakeover;
+                changed = true;
+            }
+            if (enableAndroidCompatFix != EnableAndroidCompatFix)
+            {
+                EnableAndroidCompatFix = enableAndroidCompatFix;
                 changed = true;
             }
             if (changed) SaveConfig();

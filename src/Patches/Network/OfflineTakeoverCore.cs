@@ -2,10 +2,14 @@
 using System.Collections.Generic;
 using System.Reflection;
 using HarmonyLib;
+using Godot;
+using MegaCrit.Sts2.Core.Combat;
+using MegaCrit.Sts2.Core.Entities.Multiplayer;
 using MegaCrit.Sts2.Core.GameActions;
 using MegaCrit.Sts2.Core.Logging;
 using MegaCrit.Sts2.Core.Multiplayer;
 using MegaCrit.Sts2.Core.Multiplayer.Game;
+using MegaCrit.Sts2.Core.Multiplayer.Game.Lobby;
 using MegaCrit.Sts2.Core.Runs;
 using MegaCrit.Sts2.Core.Context;
 using MegaCrit.Sts2.Core.GameActions.Multiplayer;
@@ -15,6 +19,10 @@ namespace DirectConnectIP.Patches.Network;
 public static class OfflineTakeoverCore
 {
     private static readonly MethodInfo EnqueueActionMethod = AccessTools.Method(typeof(ActionQueueSynchronizer), "EnqueueAction");
+    private const ulong OfflineTakeoverDelayMs = 8_000;
+    private const ulong PendingRejoinGraceMs = 3_000;
+    private static readonly Dictionary<ulong, OfflinePeerState> OfflinePeers = [];
+    private static readonly object OfflinePeersLock = new();
 
     public static bool IsTakeoverConfigEnabled() => ModEntry.Config is { EnableOfflineTakeover: true };
     
@@ -28,7 +36,9 @@ public static class OfflineTakeoverCore
             if (RunManager.Instance is not { NetService: { } netService }) return false;
             if (netService.Type is not (NetGameType.Host or NetGameType.Client)) return false;
 
-            return !GetOnlineIds().Contains(netId);
+            if (GetOnlineIds().Contains(netId)) return false;
+            if (netService.Type == NetGameType.Client) return true;
+            return IsOfflineLongEnoughForTakeover(netId);
         }
         catch
         {
@@ -52,18 +62,114 @@ public static class OfflineTakeoverCore
         {
             foreach (var peer in hostService.ConnectedPeers)
             {
-                ids.Add(peer.peerId);
+                if (peer.readyForBroadcasting)
+                {
+                    ids.Add(peer.peerId);
+                }
             }
         }
-        else if (netService.Type == NetGameType.Client && PlayerNameRegistry.RemoteNames != null)
+        else if (netService.Type == NetGameType.Client && RunManager.Instance.RunLobby is RunLobby runLobby)
         {
-            foreach (var id in PlayerNameRegistry.RemoteNames.Keys)
+            foreach (var id in runLobby.ConnectedPlayerIds)
             {
                 ids.Add(id);
             }
         }
 
         return ids;
+    }
+
+    public static void MarkPeerDisconnected(ulong netId, NetError reason)
+    {
+        if (LocalContext.NetId == netId) return;
+
+        lock (OfflinePeersLock)
+        {
+            if (!OfflinePeers.TryGetValue(netId, out var state))
+            {
+                state = new OfflinePeerState();
+                OfflinePeers[netId] = state;
+            }
+
+            if (reason != NetError.RunInProgress || state.DisconnectedAtMsec == 0)
+            {
+                state.DisconnectedAtMsec = Time.GetTicksMsec();
+            }
+
+            state.TransportConnected = false;
+            state.LastDisconnectReason = reason;
+        }
+    }
+
+    public static void MarkPeerTransportConnected(ulong netId)
+    {
+        if (LocalContext.NetId == netId) return;
+
+        lock (OfflinePeersLock)
+        {
+            if (!OfflinePeers.TryGetValue(netId, out var state))
+            {
+                state = new OfflinePeerState();
+                OfflinePeers[netId] = state;
+            }
+
+            state.TransportConnected = true;
+            state.TransportConnectedAtMsec = Time.GetTicksMsec();
+        }
+    }
+
+    public static void MarkPeerRejoined(ulong netId)
+    {
+        lock (OfflinePeersLock)
+        {
+            OfflinePeers.Remove(netId);
+        }
+    }
+
+    public static void ClearPeerState()
+    {
+        lock (OfflinePeersLock)
+        {
+            OfflinePeers.Clear();
+        }
+    }
+
+    public static bool ShouldRejectRunningRejoin(ulong netId, out NetError reason, out string detail)
+    {
+        reason = NetError.RunInProgress;
+        detail = string.Empty;
+
+        if (!IsDirectConnectActive) return false;
+
+        var runState = RunManager.Instance.DebugOnlyGetState();
+        if (runState?.CurrentRoomCount > 0)
+        {
+            var hadTakeover = false;
+            lock (OfflinePeersLock)
+            {
+                hadTakeover = OfflinePeers.TryGetValue(netId, out var state) && state.CombatTakeoverAdvanced;
+            }
+
+            detail = hadTakeover
+                ? "玩家断线后战斗托管已经推进过战斗状态，当前版本不会让旧战斗状态客户端直接重连。"
+                : "当前处于房间内瞬态流程，运行中重连暂不安全。";
+            return true;
+        }
+
+        if (runState != null)
+        {
+            var onlineIds = GetOnlineIds();
+            foreach (var player in runState.Players)
+            {
+                if (player.NetId == netId) continue;
+                if (onlineIds.Contains(player.NetId)) continue;
+
+                detail = $"玩家 {player.NetId} 尚未处于官方广播就绪状态，不能让 {netId} 进行运行中重连。";
+                return true;
+            }
+        }
+
+        return false;
     }
 
     public static void EnqueueGhostAction(GameAction action, ulong ghostNetId)
@@ -75,6 +181,7 @@ public static class OfflineTakeoverCore
             if (EnqueueActionMethod != null)
             {
                 EnqueueActionMethod.Invoke(sync, [action, ghostNetId]);
+                MarkTakeoverAdvanced(ghostNetId);
             }
             else
             {
@@ -85,5 +192,56 @@ public static class OfflineTakeoverCore
         {
             Log.Error($"[DirectConnectIP] 动作 {action} 发包失败: {ex}");
         }
+    }
+
+    private static bool IsOfflineLongEnoughForTakeover(ulong netId)
+    {
+        lock (OfflinePeersLock)
+        {
+            if (!OfflinePeers.TryGetValue(netId, out var state))
+            {
+                state = new OfflinePeerState
+                {
+                    DisconnectedAtMsec = Time.GetTicksMsec(),
+                    LastDisconnectReason = NetError.UnknownNetworkError
+                };
+                OfflinePeers[netId] = state;
+                return false;
+            }
+
+            if (state.TransportConnected && Time.GetTicksMsec() - state.TransportConnectedAtMsec < PendingRejoinGraceMs)
+            {
+                return false;
+            }
+
+            var elapsed = Time.GetTicksMsec() - state.DisconnectedAtMsec;
+            return elapsed >= OfflineTakeoverDelayMs;
+        }
+    }
+
+    private static void MarkTakeoverAdvanced(ulong netId)
+    {
+        lock (OfflinePeersLock)
+        {
+            if (!OfflinePeers.TryGetValue(netId, out var state))
+            {
+                state = new OfflinePeerState { DisconnectedAtMsec = Time.GetTicksMsec() };
+                OfflinePeers[netId] = state;
+            }
+
+            if (CombatManager.Instance.IsInProgress)
+            {
+                state.CombatTakeoverAdvanced = true;
+            }
+        }
+    }
+
+    private sealed class OfflinePeerState
+    {
+        public ulong DisconnectedAtMsec;
+        public bool TransportConnected;
+        public ulong TransportConnectedAtMsec;
+        public bool CombatTakeoverAdvanced;
+        public NetError LastDisconnectReason;
     }
 }

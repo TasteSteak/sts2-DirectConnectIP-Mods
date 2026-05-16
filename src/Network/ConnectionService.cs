@@ -1,7 +1,9 @@
 ﻿using System;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using DirectConnectIP.Helpers;
+using DirectConnectIP.Patches.Network;
 using Godot;
 using MegaCrit.Sts2.Core.Entities.Multiplayer;
 using MegaCrit.Sts2.Core.Multiplayer.Connection;
@@ -12,6 +14,7 @@ using MegaCrit.Sts2.Core.Nodes.Screens.CharacterSelect;
 using MegaCrit.Sts2.Core.Nodes.Screens.CustomRun;
 using MegaCrit.Sts2.Core.Nodes.Screens.DailyRun;
 using MegaCrit.Sts2.Core.Nodes.Screens.MainMenu;
+using MegaCrit.Sts2.Core.Multiplayer.Game.Lobby;
 using MegaCrit.Sts2.Core.Runs;
 
 namespace DirectConnectIP.Network;
@@ -62,7 +65,7 @@ public static class ConnectionService
                 return;
             }
 
-            RouteSessionState(joinResult, joinFlow.NetService);
+            await RouteSessionState(joinResult, joinFlow.NetService);
         }
         catch (OperationCanceledException)
         {
@@ -88,7 +91,7 @@ public static class ConnectionService
         }
     }
 
-    private static void RouteSessionState(JoinResult result, INetGameService netService)
+    private static async Task RouteSessionState(JoinResult result, INetGameService netService)
     {
         switch (result.sessionState.Value)
         {
@@ -111,7 +114,12 @@ public static class ConnectionService
                 break;
 
             case RunSessionState.Running:
-                HandleError(NetError.RunInProgress, netService, "尝试加入时游戏已在进行中 (RunInProgress)。");
+                if (!result.rejoinResponse.HasValue)
+                {
+                    HandleError(NetError.InternalError, netService, "状态为 Running，但缺失 rejoinResponse 数据包！");
+                    return;
+                }
+                await RejoinRunningRunAsync(result.rejoinResponse.Value, netService);
                 break;
 
             case RunSessionState.None:
@@ -160,6 +168,72 @@ public static class ConnectionService
                 break;
             default:
                 throw new ArgumentOutOfRangeException(nameof(mode), mode, "未知的 GameMode。");
+        }
+    }
+
+    private static async Task RejoinRunningRunAsync(ClientRejoinResponseMessage response, INetGameService netService)
+    {
+        try
+        {
+            GD.Print("[DirectConnectIP] 收到运行中重连快照，正在恢复到房主权威状态。");
+
+            MenuStateManager.CloseAllPanels();
+            var game = NGame.Instance;
+            if (game == null)
+            {
+                HandleError(NetError.InternalError, netService, "无法获取 NGame 实例，运行中重连失败。");
+                return;
+            }
+
+            await game.Transition.FadeOut();
+            PrepareForRunningSnapshotRejoin(netService);
+
+            var run = response.serializableRun;
+            var loadMessage = new ClientLoadJoinResponseMessage
+            {
+                serializableRun = run,
+                playersAlreadyConnected = run.Players.Select(p => p.NetId).ToList()
+            };
+            var lobby = new LoadRunLobby(netService, new RejoinLoadRunLobbyListener(), loadMessage);
+            var runState = RunState.FromSerializable(run);
+            await RunManager.Instance.SetUpSavedMultiPlayer(runState, lobby);
+            await game.LoadRun(runState, run.PreFinishedRoom);
+            lobby.CleanUp(disconnectSession: false);
+            await game.Transition.FadeIn();
+        }
+        catch (Exception ex)
+        {
+            GD.PrintErr($"[DirectConnectIP] 运行中重连恢复失败:\n{ex.Message}\n{ex.StackTrace}");
+            HandleError(NetError.InternalError, netService, "运行中重连恢复失败。");
+        }
+    }
+
+    private static void PrepareForRunningSnapshotRejoin(INetGameService incomingNetService)
+    {
+        var runManager = RunManager.Instance;
+        if (runManager.DebugOnlyGetState() == null) return;
+
+        if (ReferenceEquals(runManager.NetService, incomingNetService))
+        {
+            throw new InvalidOperationException("运行中重连前发现新连接已绑定到旧 RunManager，无法安全清理旧状态。");
+        }
+
+        GD.Print("[DirectConnectIP] 清理本地旧运行状态，准备载入房主权威快照。");
+        runManager.CleanUp(false);
+        OfflineTakeoverCore.IsDirectConnectActive = incomingNetService.IsConnected;
+    }
+
+    private sealed class RejoinLoadRunLobbyListener : ILoadRunLobbyListener
+    {
+        public void PlayerConnected(ulong playerId) { }
+        public void RemotePlayerDisconnected(ulong playerId) { }
+        public Task<bool> ShouldAllowRunToBegin() => Task.FromResult(true);
+        public void BeginRun() { }
+        public void PlayerReadyChanged(ulong playerId) { }
+
+        public void LocalPlayerDisconnected(NetErrorInfo info)
+        {
+            PopupHelper.ShowNetError(info);
         }
     }
 

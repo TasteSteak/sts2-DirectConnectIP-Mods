@@ -30,10 +30,19 @@ namespace DirectConnectIP.Network
         {
             _netId = myNetId;
             _connection = new ENetConnection();
-            _connection.CreateHost();
+            _connection.CreateHost(
+                EnetTransportSettings.ClientHostMaxPeers,
+                EnetTransportSettings.ChannelCount,
+                EnetTransportSettings.UnlimitedBandwidth,
+                EnetTransportSettings.UnlimitedBandwidth);
 
-            _peer = _connection.ConnectToHost(ip, port);
-            _logger.Info($"Connecting to {ip}:{port} with ID {myNetId}");
+            var endpoint = $"{ip}:{port}";
+            _peer = _connection.ConnectToHost(
+                ip,
+                port,
+                EnetTransportSettings.ChannelCount,
+                EnetTransportSettings.ConnectData);
+            _logger.Info($"Connecting to {endpoint} with ID {myNetId}");
 
             var timeout = 0;
             while (true)
@@ -46,16 +55,19 @@ namespace DirectConnectIP.Network
                     if (data.Value.type == ENetConnection.EventType.Disconnect) return new NetErrorInfo(NetError.UnknownNetworkError, false);
                 }
 
-                try { await Task.Delay(100, cancelToken); }
+                try { await Task.Delay(EnetTransportSettings.PollIntervalMs, cancelToken); }
                 catch (OperationCanceledException)
                 {
                     DisconnectFromHost(NetError.CancelledJoin);
                     return null;
                 }
 
-                timeout += 100;
-                if (timeout <= 10000) continue;
+                timeout += EnetTransportSettings.PollIntervalMs;
+                if (timeout <= EnetTransportSettings.ConnectTimeoutMs) continue;
                 _peer?.Reset();
+                _logger.Error(
+                    $"Timed out before receiving ENet connect event from {endpoint}. " +
+                    "This usually means the host is not listening on a compatible address family or UDP traffic is blocked.");
                 return new NetErrorInfo(NetError.Timeout, false);
             }
 
@@ -63,7 +75,7 @@ namespace DirectConnectIP.Network
             _peer?.Send(0, handshakeReq.AllBytes, 1);
 
             var bufferedPackets = new List<ENetServiceData>();
-            var (response, error) = await WaitForHandshakeResponse(bufferedPackets, cancelToken);
+            var (response, error) = await WaitForHandshakeResponse(bufferedPackets, endpoint, cancelToken);
             if (error != null) return error;
             if (response == null) return new NetErrorInfo(NetError.InternalError, false);
 
@@ -94,12 +106,12 @@ namespace DirectConnectIP.Network
         }
 
         private async Task<(ENetHandshakeResponse? response, NetErrorInfo? error)> WaitForHandshakeResponse(
-            List<ENetServiceData> bufferedPackets, CancellationToken cancelToken)
+            List<ENetServiceData> bufferedPackets, string endpoint, CancellationToken cancelToken)
         {
             var timeout = 0;
             while (true)
             {
-                try { await Task.Delay(100, cancelToken); }
+                try { await Task.Delay(EnetTransportSettings.PollIntervalMs, cancelToken); }
                 catch (OperationCanceledException)
                 {
                     DisconnectFromHost(NetError.CancelledJoin);
@@ -135,11 +147,20 @@ namespace DirectConnectIP.Network
                         }
                     }
                     else if (data.Value.type == ENetConnection.EventType.Disconnect)
+                    {
+                        _logger.Warn($"Disconnected while waiting for handshake response from {endpoint}");
                         return (null, new NetErrorInfo(NetError.UnknownNetworkError, false));
+                    }
                 }
 
-                timeout += 100;
-                if (timeout > 10000) return (null, new NetErrorInfo(NetError.Timeout, false));
+                timeout += EnetTransportSettings.PollIntervalMs;
+                if (timeout > EnetTransportSettings.ConnectTimeoutMs)
+                {
+                    _logger.Error(
+                        $"Timed out waiting for handshake response from {endpoint}. " +
+                        "The UDP path may be partially open, but the host never acknowledged our net ID.");
+                    return (null, new NetErrorInfo(NetError.Timeout, false));
+                }
             }
         }
 

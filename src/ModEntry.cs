@@ -12,7 +12,10 @@ namespace DirectConnectIP;
 public static class ModEntry
 {
     public static readonly ModConfigManager Config = new();
-    private const string Version = "1.2.7";
+    private static readonly string Version =
+        Assembly.GetExecutingAssembly().GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion ??
+        Assembly.GetExecutingAssembly().GetName().Version?.ToString(3) ??
+        "0.0.0";
 
     public static void Initialize()
     {

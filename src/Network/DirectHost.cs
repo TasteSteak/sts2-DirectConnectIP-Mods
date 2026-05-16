@@ -33,22 +33,43 @@ public class DirectHost(INetHostHandler handler) : NetHost(handler)
     public NetErrorInfo? StartHost(ushort port, int maxClients, ulong hostNetId)
     {
         _hostNetId = hostNetId;
-        if (_connection != null) { _connection.Destroy(); _connection = null; }
-        _connection = new ENetConnection();
-    
-        var err = _connection.CreateHostBound("*", port, maxClients);
-        if (err != Error.Ok)
+        _isConnected = false;
+        OfflineTakeoverCore.IsDirectConnectActive = false;
+        OfflineTakeoverCore.ClearPeerState();
+
+        if (_connection != null)
         {
-            _logger.Error($"Failed to create host: {err}");
             _connection.Destroy();
             _connection = null;
-            return new NetErrorInfo(err);
         }
-    
-        _isConnected = true;
-        OfflineTakeoverCore.IsDirectConnectActive = true;
-        _logger.Info($"DirectHost started on port {port} with ID {hostNetId}");
-        return null;
+
+        NetErrorInfo? lastError = null;
+        foreach (var bindAddress in EnetTransportSettings.HostBindAddresses)
+        {
+            _connection = new ENetConnection();
+            var err = _connection.CreateHostBound(
+                bindAddress,
+                port,
+                maxClients,
+                EnetTransportSettings.ChannelCount,
+                EnetTransportSettings.UnlimitedBandwidth,
+                EnetTransportSettings.UnlimitedBandwidth);
+
+            if (err == Error.Ok)
+            {
+                _isConnected = true;
+                OfflineTakeoverCore.IsDirectConnectActive = true;
+                _logger.Info($"DirectHost started on {bindAddress}:{port} with ID {hostNetId} (max peers: {maxClients})");
+                return null;
+            }
+
+            _logger.Warn($"Failed to create host on {bindAddress}:{port}: {err}");
+            _connection.Destroy();
+            _connection = null;
+            lastError = new NetErrorInfo(err);
+        }
+
+        return lastError;
     }
 
     public override void Update()
@@ -66,7 +87,10 @@ public class DirectHost(INetHostHandler handler) : NetHost(handler)
                     break;
                 case ENetConnection.EventType.Connect:
                     _logger.Debug("New client connected, waiting for handshake");
-                    data.Value.peer.SetTimeout(24, 20000, 20000);
+                    data.Value.peer.SetTimeout(
+                        EnetTransportSettings.PeerTimeoutLimit,
+                        EnetTransportSettings.PeerTimeoutMinMs,
+                        EnetTransportSettings.PeerTimeoutMaxMs);
                     break;
                 case ENetConnection.EventType.Disconnect:
                     HandleDisconnect(data.Value.peer, NetError.Quit, notifyHandler: true);
@@ -80,9 +104,10 @@ public class DirectHost(INetHostHandler handler) : NetHost(handler)
         }
 
         var now = (long)Time.GetTicksMsec();
-        foreach (var pending in _pendingHandshakes.ToList().Where(pending => now - pending.ReceivedMsec > 10000))
+        foreach (var pending in _pendingHandshakes.ToList().Where(
+                     pending => now - pending.ReceivedMsec > EnetTransportSettings.ConnectTimeoutMs))
         {
-            _logger.Warn($"Handshake timeout for peer");
+            _logger.Warn($"Handshake timeout for peer {pending.NetId}");
             try { pending.Peer.Reset(); }
             catch
             {
@@ -192,6 +217,7 @@ public class DirectHost(INetHostHandler handler) : NetHost(handler)
         var conn = GetConnectionByPeer(peer);
         if (conn.HasValue)
         {
+            OfflineTakeoverCore.MarkPeerDisconnected(conn.Value.NetId, reason);
             _connectedPeers.Remove(conn.Value);
             if (notifyHandler)
                 _handler.OnPeerDisconnected(conn.Value.NetId, new NetErrorInfo(reason, false));
@@ -212,7 +238,7 @@ public class DirectHost(INetHostHandler handler) : NetHost(handler)
 
     private async Task DelayedHandshakeQueue(ENetPacketPeer peer, ulong clientNetId)
     {
-        try { await Task.Delay(10); }
+        try { await Task.Delay(EnetTransportSettings.HandshakeDelayMs); }
         catch
         {
             // ignored
@@ -237,6 +263,7 @@ public class DirectHost(INetHostHandler handler) : NetHost(handler)
         }
         _pendingHandshakes.Remove(pending);
         _connectedPeers.Add(new ClientConnection { Peer = peer, NetId = clientNetId });
+        OfflineTakeoverCore.MarkPeerTransportConnected(clientNetId);
         
         _handler.OnPeerConnected(clientNetId);
         SystemPreheater.PrewarmPlayer(clientNetId);
@@ -285,6 +312,7 @@ public class DirectHost(INetHostHandler handler) : NetHost(handler)
             conn.Value.Peer.Send(0, packet.AllBytes, 1);
             conn.Value.Peer.PeerDisconnectLater();
         }
+        OfflineTakeoverCore.MarkPeerDisconnected(peerId, reason);
         _connectedPeers.Remove(conn.Value);
         _handler.OnPeerDisconnected(peerId, new NetErrorInfo(reason, true));
     }
@@ -301,6 +329,7 @@ public class DirectHost(INetHostHandler handler) : NetHost(handler)
         }
         _isConnected = false;
         OfflineTakeoverCore.IsDirectConnectActive = false;
+        OfflineTakeoverCore.ClearPeerState();
         _handler.OnDisconnected(new NetErrorInfo(reason, true));
     }
 

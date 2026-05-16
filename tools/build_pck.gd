@@ -1,5 +1,52 @@
 extends SceneTree
 
+func read_text_file(path: String) -> String:
+	var file := FileAccess.open(path, FileAccess.READ)
+	if file == null:
+		push_error("Failed to open file for reading: %s" % path)
+		return ""
+	var content := file.get_as_text()
+	file.close()
+	return content
+
+func write_text_file(path: String, content: String) -> int:
+	var file := FileAccess.open(path, FileAccess.WRITE)
+	if file == null:
+		push_error("Failed to open file for writing: %s" % path)
+		return ERR_CANT_CREATE
+	file.store_string(content)
+	file.close()
+	return OK
+
+func sync_versioned_metadata(output_dir: String) -> int:
+	var version := read_text_file("res://version.txt").strip_edges()
+	if version.is_empty():
+		push_error("version.txt is empty or unreadable")
+		return ERR_INVALID_DATA
+
+	var direct_template := read_text_file("res://DirectConnectIP.template.json")
+	var manifest_template := read_text_file("res://mod_manifest.template.json")
+	if direct_template.is_empty() or manifest_template.is_empty():
+		return ERR_FILE_NOT_FOUND
+
+	var direct_manifest := direct_template.replace("__VERSION__", version)
+	var pck_manifest := manifest_template.replace("__VERSION__", version)
+
+	var err := write_text_file("res://DirectConnectIP.json", direct_manifest)
+	if err != OK:
+		return err
+
+	err = write_text_file("res://mod_manifest.json", pck_manifest)
+	if err != OK:
+		return err
+
+	err = write_text_file(output_dir.path_join("DirectConnectIP.json"), direct_manifest)
+	if err != OK:
+		return err
+
+	print("Version metadata synchronized to %s" % version)
+	return OK
+
 # 在 .godot/imported 目录下查找与图片源文件名匹配的 .ctex 文件
 func find_image_ctex(imported_dir: String, image_file_name: String) -> String:
 	var dir := DirAccess.open(imported_dir)
@@ -169,6 +216,11 @@ func _initialize():
 	
 	# 确保输出目录存在
 	DirAccess.make_dir_recursive_absolute(output_dir)
+
+	var sync_ok := sync_versioned_metadata(output_dir)
+	if sync_ok != OK:
+		push_error("Sync versioned metadata failed: %s" % sync_ok)
+		quit(1)
 	
 	# 初始化 PCKPacker
 	var packer := PCKPacker.new()

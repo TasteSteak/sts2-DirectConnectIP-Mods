@@ -6,9 +6,24 @@
         <NuGetAudit>false</NuGetAudit>
     </PropertyGroup>
 
+    <PropertyGroup>
+        <VersionFile>$(MSBuildProjectDirectory)\version.txt</VersionFile>
+        <DirectConnectManifestTemplate>$(MSBuildProjectDirectory)\DirectConnectIP.template.json</DirectConnectManifestTemplate>
+        <PckManifestTemplate>$(MSBuildProjectDirectory)\mod_manifest.template.json</PckManifestTemplate>
+    </PropertyGroup>
+
+    <PropertyGroup>
+        <ModVersion>$([System.IO.File]::ReadAllText('$(VersionFile)').Trim())</ModVersion>
+        <Version>$(ModVersion)</Version>
+        <AssemblyVersion>$(ModVersion).0</AssemblyVersion>
+        <FileVersion>$(ModVersion).0</FileVersion>
+        <InformationalVersion>$(ModVersion)</InformationalVersion>
+        <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+    </PropertyGroup>
+
     <ItemGroup>
         <Reference Include="sts2">
-            <HintPath>lib\sts2.dll</HintPath>
+            <HintPath>lib\0105\sts2.dll</HintPath>
             <Private>False</Private>
         </Reference>
 
@@ -24,21 +39,32 @@
     </ItemGroup>
 
     <ItemGroup>
-      <Content Include="Changelog.md" />
-      <Content Include="LICENSE" />
-      <Content Include="README.md" />
-      <Content Include="README_CN.md" />
+        <Content Include="Changelog.md" />
+        <Content Include="LICENSE" />
+        <Content Include="README.md" />
+        <Content Include="README_CN.md" />
     </ItemGroup>
 
     <ItemGroup>
-      <Folder Include="img\" />
+        <Folder Include="img\" />
     </ItemGroup>
+
+    <Target Name="GenerateVersionedMetadata" BeforeTargets="BeforeBuild">
+        <PropertyGroup>
+            <DirectConnectManifestContent>$([System.IO.File]::ReadAllText('$(DirectConnectManifestTemplate)').Replace('__VERSION__', '$(ModVersion)'))</DirectConnectManifestContent>
+            <PckManifestContent>$([System.IO.File]::ReadAllText('$(PckManifestTemplate)').Replace('__VERSION__', '$(ModVersion)'))</PckManifestContent>
+        </PropertyGroup>
+
+        <WriteLinesToFile File="$(ProjectDir)DirectConnectIP.json" Lines="$(DirectConnectManifestContent)" Overwrite="true" />
+        <WriteLinesToFile File="$(ProjectDir)mod_manifest.json" Lines="$(PckManifestContent)" Overwrite="true" />
+    </Target>
 
     <Target Name="CopyToBuildFolder" AfterTargets="Build">
         <MakeDir Directories="$(ProjectDir)build" />
 
         <Copy SourceFiles="$(TargetPath)" DestinationFolder="$(ProjectDir)build" />
+        <Copy SourceFiles="$(ProjectDir)DirectConnectIP.json" DestinationFiles="$(ProjectDir)build\DirectConnectIP.json" />
 
-        <Message Text="已额外生成到build文件夹中" Importance="high" />
+        <Message Text="已额外生成到 build 文件夹中" Importance="high" />
     </Target>
 </Project>

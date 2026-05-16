@@ -18,12 +18,48 @@ using MegaCrit.Sts2.Core.Models;
 using MegaCrit.Sts2.Core.Models.Relics;
 using MegaCrit.Sts2.Core.Multiplayer;
 using MegaCrit.Sts2.Core.Multiplayer.Game;
+using MegaCrit.Sts2.Core.Multiplayer.Game.Lobby;
 using MegaCrit.Sts2.Core.Multiplayer.Messages.Game;
+using MegaCrit.Sts2.Core.Multiplayer.Messages.Lobby;
 using MegaCrit.Sts2.Core.Runs;
 using MegaCrit.Sts2.Core.Saves;
 using MegaCrit.Sts2.Core.Saves.Runs;
 
 namespace DirectConnectIP.Patches.Network;
+
+[HarmonyPatch(typeof(RunLobby), "HandleClientRejoinRequestMessage")]
+public static class RunningRejoinGuardPatch
+{
+    static bool Prepare() => OfflineTakeoverCore.IsTakeoverConfigEnabled();
+
+    public static bool Prefix(ClientRejoinRequestMessage message, ulong senderId, out bool __state)
+    {
+        __state = false;
+        if (!OfflineTakeoverCore.IsDirectConnectActive) return true;
+        if (!OfflineTakeoverCore.ShouldRejectRunningRejoin(senderId, out var reason, out var detail))
+        {
+            __state = RunManager.Instance.DebugOnlyGetState()?.Players.Any(p => p.NetId == senderId) == true;
+            return true;
+        }
+
+        Log.Warn($"[DirectConnectIP] 拒绝玩家 {senderId} 运行中重连：{detail}");
+        if (RunManager.Instance.NetService is NetHostGameService hostService)
+        {
+            hostService.DisconnectClient(senderId, reason);
+        }
+
+        return false;
+    }
+
+    public static void Postfix(ulong senderId, bool __state)
+    {
+        if (!__state) return;
+        if (!OfflineTakeoverCore.IsDirectConnectActive) return;
+        if (OfflineTakeoverCore.ShouldRejectRunningRejoin(senderId, out _, out _)) return;
+
+        OfflineTakeoverCore.MarkPeerRejoined(senderId);
+    }
+}
 
 [HarmonyPatch(typeof(PlayCardAction), "ExecuteAction")]
 public static class PlayCardActionGhostPatch
@@ -590,6 +626,7 @@ public static class AutoPassRemoteChoiceForGhostsPatch
     public static void Prefix(PlayerChoiceSynchronizer __instance, Player player, uint choiceId)
     {
         if (!OfflineTakeoverCore.IsDirectConnectActive) return;
+        if (RunManager.Instance.NetService.Type != NetGameType.Host) return;
         if (!OfflineTakeoverCore.IsGhost(player.NetId)) return;
 
         var defaultNetResult = PlayerChoiceResult.FromIndex(0).ToNetData();

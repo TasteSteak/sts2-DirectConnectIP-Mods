@@ -9,10 +9,12 @@ public partial class ProfileSettingsScreen : DirectUiScreen
 {
     private LineEdit _nameInput = null!;
     private LineEdit _idInput = null!;
+    private CheckButton _offlineTakeoverToggle = null!;
+    private CheckButton _androidCompatToggle = null!;
     private SfxButton _saveBtn = null!;
 
-    protected override Vector2 PanelSize => new(460, 520);
-    protected override int VBoxSeparation => 20;
+    protected override Vector2 PanelSize => new(500, 620);
+    protected override int VBoxSeparation => 16;
     protected override Control InitialFocusedControl => _nameInput;
     protected override bool ShouldInjectBackground => false;
 
@@ -33,12 +35,26 @@ public partial class ProfileSettingsScreen : DirectUiScreen
         _idInput.PlaceholderText = LocTexts.ProfileIdLabel;
         Vbox.AddChild(idBox);
 
+        var restartLabel = new Label {
+            Text = LocTexts.ProfileRestartSection,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            CustomMinimumSize = new Vector2(420, 24)
+        };
+        restartLabel.AddThemeColorOverride("font_color", new Color(0.95f, 0.78f, 0.35f));
+        restartLabel.AddThemeFontSizeOverride("font_size", 16);
+        Vbox.AddChild(restartLabel);
+
+        _offlineTakeoverToggle = CreateSettingsToggle(LocTexts.ProfileOfflineTakeoverLabel, ModEntry.Config.EnableOfflineTakeover);
+        _androidCompatToggle = CreateSettingsToggle(LocTexts.ProfileAndroidCompatLabel, ModEntry.Config.EnableAndroidCompatFix);
+        Vbox.AddChild(_offlineTakeoverToggle);
+        Vbox.AddChild(_androidCompatToggle);
+
         var warningLabel = new Label {
             Text = LocTexts.ProfileWarning,
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
             AutowrapMode = TextServer.AutowrapMode.WordSmart,
-            CustomMinimumSize = new Vector2(400, 60),
+            CustomMinimumSize = new Vector2(420, 55),
             SizeFlagsVertical = Control.SizeFlags.ExpandFill
         };
         warningLabel.AddThemeColorOverride("font_color", new Color(0.9f, 0.4f, 0.4f)); 
@@ -75,7 +91,7 @@ public partial class ProfileSettingsScreen : DirectUiScreen
             return; 
         }
 
-        ModEntry.Config.UpdateProfile(newName, newId);
+        ModEntry.Config.UpdateSettings(newName, newId, _offlineTakeoverToggle.ButtonPressed, _androidCompatToggle.ButtonPressed);
         CloseScreen();
     }
 
@@ -108,5 +124,17 @@ public partial class ProfileSettingsScreen : DirectUiScreen
         group.AddChild(label);
         group.AddChild(input);
         return group;
+    }
+
+    private static CheckButton CreateSettingsToggle(string text, bool enabled)
+    {
+        var toggle = new CheckButton {
+            Text = text,
+            ButtonPressed = enabled,
+            CustomMinimumSize = new Vector2(420, 38),
+            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill
+        };
+        toggle.AddThemeFontSizeOverride("font_size", 16);
+        return toggle;
     }
 }

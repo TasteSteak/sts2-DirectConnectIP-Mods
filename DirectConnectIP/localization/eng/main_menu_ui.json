@@ -7,7 +7,7 @@
   "MOD_DC_BTN_STEAM": "Steam Mode",
   "MOD_DC_BTN_ENET": "Direct IP Mode",
   "MOD_DC_ERR_STEAM": "Steam environment not detected. Mode unavailable.",
-  "MOD_DC_BTN_PROFILE": "Edit Profile (Name/ID)",
+  "MOD_DC_BTN_PROFILE": "Mod Settings",
   "MOD_DC_BTN_CANCEL": "Cancel",
   "MOD_DC_TITLE_JOIN_SERVER": "Join Custom Server",
   "MOD_DC_PLACEHOLDER_IP": "Enter Server IP or Domain",
@@ -18,9 +18,12 @@
   "MOD_DC_LOADING_CONNECTING": "Connecting to\n{0}",
   "MOD_DC_BTN_CANCEL_CONNECTION": "Cancel Connection",
 
-  "MOD_DC_PROFILE_TITLE": "Profile Settings",
+  "MOD_DC_PROFILE_TITLE": "Mod Settings",
   "MOD_DC_PROFILE_NAME_LABEL": "Player Name:",
   "MOD_DC_PROFILE_ID_LABEL": "Player ID:",
+  "MOD_DC_PROFILE_RESTART_SECTION": "Requires game restart:",
+  "MOD_DC_PROFILE_OFFLINE_TAKEOVER_LABEL": "Offline Takeover Mode",
+  "MOD_DC_PROFILE_ANDROID_COMPAT_LABEL": "Community Mobile Port Compatibility",
   "MOD_DC_PROFILE_WARNING": "Warning: Do not change your ID casually!\nIt acts as the unique identifier for your saves. Changing it mid-game will result in failed save loading or inability to reconnect!",
   "MOD_DC_BTN_SAVE": "Save",
   "MOD_DC_BTN_RETURN": "Return",
@@ -28,5 +31,5 @@
   "MOD_DC_ERR_INVALID_ID": "Invalid ID!",
 
   "MOD_DC_ERR_ID_COLLISION_TITLE": "Connection Failed",
-  "MOD_DC_ERR_ID_COLLISION_DESC": "Your Player ID is identical to someone in the room!\n\nPlease go to your profile settings and change your Player ID to a different set of numbers before trying again."
+  "MOD_DC_ERR_ID_COLLISION_DESC": "Your Player ID is identical to someone in the room!\n\nPlease go to Mod Settings and change your Player ID to a different set of numbers before trying again."
 }

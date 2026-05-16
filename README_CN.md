@@ -4,7 +4,7 @@
 
 [**English**](README.md) | [**更新日志**](Changelog.md)
 
-![Version](https://img.shields.io/badge/Version-1.2.7-blue.svg)
+![Version](https://img.shields.io/github/v/release/TasteSteak/sts2-DirectConnectIP-Mods?display_name=tag&label=Version)
 ![Game](https://img.shields.io/badge/Slay_The_Spire_2-Mod-red.svg)
 ![License](https://img.shields.io/badge/License-CC%20BY--NC%204.0-lightgrey.svg)
 ![Platform](https://img.shields.io/badge/Platform-Windows-blue.svg)

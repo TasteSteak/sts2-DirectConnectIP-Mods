@@ -45,6 +45,9 @@ public static class LocTexts
     public static string ProfileNameLabel => GetLocText("MOD_DC_PROFILE_NAME_LABEL");
     public static string ProfileIdLabel => GetLocText("MOD_DC_PROFILE_ID_LABEL");
     public static string ProfileWarning => GetLocText("MOD_DC_PROFILE_WARNING");
+    public static string ProfileRestartSection => GetLocText("MOD_DC_PROFILE_RESTART_SECTION");
+    public static string ProfileOfflineTakeoverLabel => GetLocText("MOD_DC_PROFILE_OFFLINE_TAKEOVER_LABEL");
+    public static string ProfileAndroidCompatLabel => GetLocText("MOD_DC_PROFILE_ANDROID_COMPAT_LABEL");
     public static string BtnSave => GetLocText("MOD_DC_BTN_SAVE");
     public static string BtnReturn => GetLocText("MOD_DC_BTN_RETURN");
     public static string ErrEmptyName => GetLocText("MOD_DC_ERR_EMPTY_NAME");
