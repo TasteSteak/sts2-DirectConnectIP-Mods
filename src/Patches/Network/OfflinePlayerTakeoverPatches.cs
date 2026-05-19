@@ -61,6 +61,28 @@ public static class RunningRejoinGuardPatch
     }
 }
 
+[HarmonyPatch(typeof(RunLobby), "HandlePlayerLeftMessage")]
+public static class RunLobbyPeerLeftTakeoverStatePatch
+{
+    static bool Prepare() => OfflineTakeoverCore.IsTakeoverConfigEnabled();
+
+    public static void Postfix(PlayerLeftMessage message)
+    {
+        OfflineTakeoverCore.MarkPeerDisconnected(message.playerId, NetError.Quit);
+    }
+}
+
+[HarmonyPatch(typeof(RunLobby), "HandlePlayerRejoinedMessage")]
+public static class RunLobbyPeerRejoinedTakeoverStatePatch
+{
+    static bool Prepare() => OfflineTakeoverCore.IsTakeoverConfigEnabled();
+
+    public static void Postfix(PlayerRejoinedMessage message)
+    {
+        OfflineTakeoverCore.MarkPeerRejoined(message.playerId);
+    }
+}
+
 [HarmonyPatch(typeof(PlayCardAction), "ExecuteAction")]
 public static class PlayCardActionGhostPatch
 {
@@ -516,10 +538,13 @@ public static class CombatSyncReceiveTakeoverPatch
 
     public static bool Prefix(CombatStateSynchronizer __instance, SyncPlayerDataMessage syncMessage, ulong senderId)
     {
+        if (!OfflineTakeoverCore.IsTakeoverConfigEnabled()) return true;
         if (!OfflineTakeoverCore.IsDirectConnectActive) return true;
+        if (RunManager.Instance.NetService.Type != NetGameType.Client) return true;
         
         var realPlayerId = syncMessage.player.NetId;
         if (realPlayerId == senderId) return true;
+        if (!OfflineTakeoverCore.IsGhost(realPlayerId)) return true;
         if (SyncDataField?.GetValue(__instance) is not Dictionary<ulong, SerializablePlayer> syncData) return false;
         
         syncData[realPlayerId] = syncMessage.player;

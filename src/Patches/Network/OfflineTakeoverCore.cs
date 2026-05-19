@@ -20,7 +20,6 @@ public static class OfflineTakeoverCore
 {
     private static readonly MethodInfo EnqueueActionMethod = AccessTools.Method(typeof(ActionQueueSynchronizer), "EnqueueAction");
     private const ulong OfflineTakeoverDelayMs = 8_000;
-    private const ulong PendingRejoinGraceMs = 3_000;
     private static readonly Dictionary<ulong, OfflinePeerState> OfflinePeers = [];
     private static readonly object OfflinePeersLock = new();
 
@@ -32,12 +31,12 @@ public static class OfflineTakeoverCore
     {
         try
         {
+            if (!IsTakeoverConfigEnabled()) return false;
+            if (!IsDirectConnectActive) return false;
             if (LocalContext.NetId == netId) return false;
             if (RunManager.Instance is not { NetService: { } netService }) return false;
             if (netService.Type is not (NetGameType.Host or NetGameType.Client)) return false;
 
-            if (GetOnlineIds().Contains(netId)) return false;
-            if (netService.Type == NetGameType.Client) return true;
             return IsOfflineLongEnoughForTakeover(netId);
         }
         catch
@@ -46,16 +45,16 @@ public static class OfflineTakeoverCore
         }
     }
 
-    private static HashSet<ulong> GetOnlineIds()
+    private static HashSet<ulong> GetBroadcastReadyIds()
     {
         var ids = new HashSet<ulong>();
-        
-        if (LocalContext.NetId.HasValue) 
+
+        if (LocalContext.NetId.HasValue)
             ids.Add(LocalContext.NetId.Value);
-        else if (ModEntry.Config != null) 
+        else if (ModEntry.Config != null)
             ids.Add(ModEntry.Config.LocalPlayerId);
 
-        if (RunManager.Instance is not { NetService: { IsConnected: true } netService }) 
+        if (RunManager.Instance is not { NetService: { IsConnected: true } netService })
             return ids;
 
         if (netService.Type == NetGameType.Host && netService is NetHostGameService hostService)
@@ -81,6 +80,7 @@ public static class OfflineTakeoverCore
 
     public static void MarkPeerDisconnected(ulong netId, NetError reason)
     {
+        if (!IsTakeoverConfigEnabled()) return;
         if (LocalContext.NetId == netId) return;
 
         lock (OfflinePeersLock)
@@ -94,6 +94,7 @@ public static class OfflineTakeoverCore
             if (reason != NetError.RunInProgress || state.DisconnectedAtMsec == 0)
             {
                 state.DisconnectedAtMsec = Time.GetTicksMsec();
+                state.TakeoverLogged = false;
             }
 
             state.TransportConnected = false;
@@ -103,18 +104,19 @@ public static class OfflineTakeoverCore
 
     public static void MarkPeerTransportConnected(ulong netId)
     {
+        if (!IsTakeoverConfigEnabled()) return;
         if (LocalContext.NetId == netId) return;
 
         lock (OfflinePeersLock)
         {
             if (!OfflinePeers.TryGetValue(netId, out var state))
             {
-                state = new OfflinePeerState();
-                OfflinePeers[netId] = state;
+                return;
             }
 
             state.TransportConnected = true;
             state.TransportConnectedAtMsec = Time.GetTicksMsec();
+            state.TakeoverLogged = false;
         }
     }
 
@@ -139,6 +141,7 @@ public static class OfflineTakeoverCore
         reason = NetError.RunInProgress;
         detail = string.Empty;
 
+        if (!IsTakeoverConfigEnabled()) return false;
         if (!IsDirectConnectActive) return false;
 
         var runState = RunManager.Instance.DebugOnlyGetState();
@@ -158,7 +161,7 @@ public static class OfflineTakeoverCore
 
         if (runState != null)
         {
-            var onlineIds = GetOnlineIds();
+            var onlineIds = GetBroadcastReadyIds();
             foreach (var player in runState.Players)
             {
                 if (player.NetId == netId) continue;
@@ -174,6 +177,8 @@ public static class OfflineTakeoverCore
 
     public static void EnqueueGhostAction(GameAction action, ulong ghostNetId)
     {
+        if (!IsTakeoverConfigEnabled()) return;
+
         try
         {
             if (RunManager.Instance is not { ActionQueueSynchronizer: { } sync }) return;
@@ -200,22 +205,28 @@ public static class OfflineTakeoverCore
         {
             if (!OfflinePeers.TryGetValue(netId, out var state))
             {
-                state = new OfflinePeerState
-                {
-                    DisconnectedAtMsec = Time.GetTicksMsec(),
-                    LastDisconnectReason = NetError.UnknownNetworkError
-                };
-                OfflinePeers[netId] = state;
                 return false;
             }
 
-            if (state.TransportConnected && Time.GetTicksMsec() - state.TransportConnectedAtMsec < PendingRejoinGraceMs)
+            if (state.DisconnectedAtMsec == 0)
+            {
+                return false;
+            }
+
+            if (state.TransportConnected)
             {
                 return false;
             }
 
             var elapsed = Time.GetTicksMsec() - state.DisconnectedAtMsec;
-            return elapsed >= OfflineTakeoverDelayMs;
+            var isGhost = elapsed >= OfflineTakeoverDelayMs;
+            if (isGhost && !state.TakeoverLogged)
+            {
+                state.TakeoverLogged = true;
+                Log.Warn($"[DirectConnectIP] 玩家 {netId} 已确认断开 {elapsed}ms，进入离线托管判定。原因: {state.LastDisconnectReason}");
+            }
+
+            return isGhost;
         }
     }
 
@@ -242,6 +253,7 @@ public static class OfflineTakeoverCore
         public bool TransportConnected;
         public ulong TransportConnectedAtMsec;
         public bool CombatTakeoverAdvanced;
+        public bool TakeoverLogged;
         public NetError LastDisconnectReason;
     }
 }

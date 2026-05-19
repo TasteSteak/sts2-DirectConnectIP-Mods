@@ -37,5 +37,7 @@ public static class ModEntry
                 Log.Error($"补丁类 {type.FullName} 应用失败: {ex}");
             }
         }
+
+        Patches.Network.SystemPreheater.PatchLegacyPeerInputState(harmony);
     }
 }
