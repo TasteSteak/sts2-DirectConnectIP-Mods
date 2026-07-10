@@ -218,6 +218,7 @@ public class DirectHost(INetHostHandler handler) : NetHost(handler)
         if (conn.HasValue)
         {
             OfflineTakeoverCore.MarkPeerDisconnected(conn.Value.NetId, reason);
+            OfflineTakeoverPoke.ScheduleAfterDisconnect(conn.Value.NetId);
             _connectedPeers.Remove(conn.Value);
             if (notifyHandler)
                 _handler.OnPeerDisconnected(conn.Value.NetId, new NetErrorInfo(reason, false));
@@ -313,6 +314,7 @@ public class DirectHost(INetHostHandler handler) : NetHost(handler)
             conn.Value.Peer.PeerDisconnectLater();
         }
         OfflineTakeoverCore.MarkPeerDisconnected(peerId, reason);
+        OfflineTakeoverPoke.ScheduleAfterDisconnect(peerId);
         _connectedPeers.Remove(conn.Value);
         _handler.OnPeerDisconnected(peerId, new NetErrorInfo(reason, true));
     }

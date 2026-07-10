@@ -20,7 +20,9 @@ using MegaCrit.Sts2.Core.Multiplayer;
 using MegaCrit.Sts2.Core.Multiplayer.Game;
 using MegaCrit.Sts2.Core.Multiplayer.Game.Lobby;
 using MegaCrit.Sts2.Core.Multiplayer.Messages.Game;
+using MegaCrit.Sts2.Core.Multiplayer.Messages.Game.Sync;
 using MegaCrit.Sts2.Core.Multiplayer.Messages.Lobby;
+using MegaCrit.Sts2.Core.Rooms;
 using MegaCrit.Sts2.Core.Runs;
 using MegaCrit.Sts2.Core.Saves;
 using MegaCrit.Sts2.Core.Saves.Runs;
@@ -69,6 +71,7 @@ public static class RunLobbyPeerLeftTakeoverStatePatch
     public static void Postfix(PlayerLeftMessage message)
     {
         OfflineTakeoverCore.MarkPeerDisconnected(message.playerId, NetError.Quit);
+        OfflineTakeoverPoke.ScheduleAfterDisconnect(message.playerId);
     }
 }
 
@@ -80,6 +83,147 @@ public static class RunLobbyPeerRejoinedTakeoverStatePatch
     public static void Postfix(PlayerRejoinedMessage message)
     {
         OfflineTakeoverCore.MarkPeerRejoined(message.playerId);
+    }
+}
+
+[HarmonyPatch(typeof(LoadRunLobby), "HandlePlayerLeftMessage")]
+public static class LoadRunLobbyPeerLeftTakeoverStatePatch
+{
+    static bool Prepare() => OfflineTakeoverCore.IsTakeoverConfigEnabled();
+
+    public static void Postfix(PlayerLeftMessage message)
+    {
+        OfflineTakeoverCore.MarkPeerDisconnectedImmediate(message.playerId, NetError.Quit, "load-lobby-left");
+    }
+}
+
+[HarmonyPatch(typeof(LoadRunLobby), "HandlePlayerReconnectedMessage")]
+public static class LoadRunLobbyPeerRejoinedTakeoverStatePatch
+{
+    static bool Prepare() => OfflineTakeoverCore.IsTakeoverConfigEnabled();
+
+    public static void Postfix(PlayerReconnectedMessage message)
+    {
+        OfflineTakeoverCore.MarkPeerRejoined(message.playerId);
+    }
+}
+
+[HarmonyPatch(typeof(LoadRunLobby), "TryBeginRunForAllPlayers")]
+public static class LoadRunLobbyOfflinePlayersBeforeBeginPatch
+{
+    static bool Prepare() => OfflineTakeoverCore.IsTakeoverConfigEnabled();
+
+    public static void Prefix(LoadRunLobby __instance)
+    {
+        if (!OfflineTakeoverCore.IsDirectConnectActive) return;
+        if (__instance.NetService.Type != NetGameType.Host) return;
+
+        var missingPlayers = OfflineTakeoverCore.RememberLoadedRunMissingPlayers(
+            __instance.Run,
+            __instance.ConnectedPlayerIds,
+            "host-load-run-begin");
+        if (missingPlayers.Count == 0) return;
+
+        foreach (var playerId in missingPlayers)
+        {
+            __instance.NetService.SendMessage(new PlayerLeftMessage { playerId = playerId });
+        }
+    }
+}
+
+[HarmonyPatch(typeof(LoadRunLobby), "BeginRunLocally")]
+public static class LoadRunLobbyOfflinePlayersLocalBeginPatch
+{
+    static bool Prepare() => OfflineTakeoverCore.IsTakeoverConfigEnabled();
+
+    public static void Prefix(LoadRunLobby __instance)
+    {
+        if (!OfflineTakeoverCore.IsDirectConnectActive) return;
+
+        OfflineTakeoverCore.RememberLoadedRunMissingPlayers(
+            __instance.Run,
+            __instance.ConnectedPlayerIds,
+            "load-run-local-begin");
+    }
+}
+
+[HarmonyPatch(typeof(RunManager), "InitializeRunLobby")]
+public static class LoadedRunOfflinePlayersRunLobbyPatch
+{
+    static bool Prepare() => OfflineTakeoverCore.IsTakeoverConfigEnabled();
+
+    public static void Postfix(RunManager __instance, RunState state)
+    {
+        OfflineTakeoverCore.ApplyLoadedRunOfflinePlayersToRunLobby(__instance.RunLobby, state);
+    }
+}
+
+public static class OfflineTakeoverPoke
+{
+    public static void ScheduleAfterDisconnect(ulong netId)
+    {
+        if (!OfflineTakeoverCore.IsDirectConnectActive) return;
+
+        var retryDelayMs = OfflineTakeoverCore.IsPendingGhost(netId, out var remainingMs)
+            ? remainingMs + 150UL
+            : 250UL;
+        OfflineTakeoverCore.ScheduleTakeoverRetry(typeof(OfflineTakeoverPoke), $"disconnect:{netId}", retryDelayMs, PokeCurrentSynchronizers);
+    }
+
+    private static void PokeCurrentSynchronizers()
+    {
+        try
+        {
+            if (!OfflineTakeoverCore.IsDirectConnectActive) return;
+            if (RunManager.Instance is not { NetService: { Type: NetGameType.Host } } runManager) return;
+
+            var runState = runManager.DebugOnlyGetState();
+            var player = runState?.Players.FirstOrDefault(p => !OfflineTakeoverCore.IsOfflineOrPending(p.NetId))
+                         ?? runState?.Players.FirstOrDefault();
+            var roomType = runState?.CurrentRoom?.RoomType ?? RoomType.Unassigned;
+
+            var actionQueueSynchronizer = runManager.ActionQueueSynchronizer;
+            if (actionQueueSynchronizer != null && CombatManager.Instance.IsInProgress)
+            {
+                ConcurrentAutoPlayTurnPatch.Postfix(actionQueueSynchronizer, actionQueueSynchronizer.CombatState);
+                AutoReadyEnemyTurnPatch.Postfix(actionQueueSynchronizer, actionQueueSynchronizer.CombatState);
+            }
+
+            if (player != null && CombatManager.Instance.IsInProgress)
+            {
+                CombatTurnEndTakeoverPatch.Postfix(CombatManager.Instance, player);
+                SetReadyToBeginEnemyTakeoverPatch.Postfix(CombatManager.Instance, player);
+            }
+
+            if (roomType == RoomType.Map && runManager.MapSelectionSynchronizer != null)
+            {
+                MapSelectionGhostPatch.Postfix(runManager.MapSelectionSynchronizer);
+            }
+
+            if (player != null && roomType == RoomType.Treasure && runManager.TreasureRoomRelicSynchronizer != null)
+            {
+                TreasureUnblockPatch.Postfix(runManager.TreasureRoomRelicSynchronizer, player);
+            }
+
+            if (player != null && roomType == RoomType.Boss && runManager.ActChangeSynchronizer != null)
+            {
+                ActChangeGhostPatch.Postfix(runManager.ActChangeSynchronizer, player);
+            }
+
+            if (runManager.CombatStateSynchronizer != null)
+            {
+                CombatSyncTakeoverPatch.Postfix(runManager.CombatStateSynchronizer);
+            }
+
+            if (roomType == RoomType.Event && runManager.EventSynchronizer != null)
+            {
+                EventUnblockPatch.Postfix(runManager.EventSynchronizer);
+            }
+        }
+        catch (Exception ex)
+        {
+            Log.Error($"[DirectConnectIP] 离线托管状态刷新失败: {ex}");
+        }
     }
 }
 
@@ -140,6 +284,15 @@ public static class ConcurrentAutoPlayTurnPatch
         if (state == null) return;
 
         var roundNumber = state.RoundNumber;
+        if (OfflineTakeoverCore.HasPendingGhost(state.Players.Select(p => p.NetId), out var retryDelayMs))
+        {
+            OfflineTakeoverCore.ScheduleTakeoverRetry(__instance, $"{nameof(ConcurrentAutoPlayTurnPatch)}:{roundNumber}", retryDelayMs, () =>
+            {
+                if (!ReferenceEquals(RunManager.Instance.ActionQueueSynchronizer, __instance)) return;
+                if (__instance.CombatState != ActionSynchronizerCombatState.PlayPhase) return;
+                Postfix(__instance, ActionSynchronizerCombatState.PlayPhase);
+            });
+        }
 
         foreach (var p in state.Players)
         {
@@ -232,6 +385,15 @@ public static class AutoReadyEnemyTurnPatch
         if (state == null) return;
 
         var readySet = ReadyPlayersField?.GetValue(CombatManager.Instance) as HashSet<Player>;
+        if (OfflineTakeoverCore.HasPendingGhost(state.Players.Select(p => p.NetId), out var retryDelayMs))
+        {
+            OfflineTakeoverCore.ScheduleTakeoverRetry(__instance, nameof(AutoReadyEnemyTurnPatch), retryDelayMs, () =>
+            {
+                if (!ReferenceEquals(RunManager.Instance.ActionQueueSynchronizer, __instance)) return;
+                if (__instance.CombatState != ActionSynchronizerCombatState.EndTurnPhaseOne) return;
+                Postfix(__instance, ActionSynchronizerCombatState.EndTurnPhaseOne);
+            });
+        }
         
         foreach (var p in state.Players)
         {
@@ -260,8 +422,18 @@ public static class CombatTurnEndTakeoverPatch
         if (state == null || !__instance.IsInProgress || state.CurrentSide != CombatSide.Player) return;
         if (state.Players.All(p => OfflineTakeoverCore.IsGhost(p.NetId))) return;
 
-        var allOnlineReady = state.Players.Where(p => !OfflineTakeoverCore.IsGhost(p.NetId) && p.Creature.IsAlive).All(__instance.IsPlayerReadyToEndTurn);
+        var allOnlineReady = state.Players.Where(p => !OfflineTakeoverCore.IsOfflineOrPending(p.NetId) && p.Creature.IsAlive).All(__instance.IsPlayerReadyToEndTurn);
         if (!allOnlineReady) return;
+
+        if (OfflineTakeoverCore.HasPendingGhost(state.Players.Select(p => p.NetId), out var retryDelayMs))
+        {
+            OfflineTakeoverCore.ScheduleTakeoverRetry(__instance, nameof(CombatTurnEndTakeoverPatch), retryDelayMs, () =>
+            {
+                if (!CombatManager.Instance.IsInProgress) return;
+                Postfix(__instance, player);
+            });
+            return;
+        }
 
         var roundNumber = state.RoundNumber;
         foreach (var p in state.Players)
@@ -290,8 +462,18 @@ public static class SetReadyToBeginEnemyTakeoverPatch
         if (state == null) return;
         if (state.Players.All(p => OfflineTakeoverCore.IsGhost(p.NetId))) return;
 
-        var allOnlineReady = state.Players.Where(p => !OfflineTakeoverCore.IsGhost(p.NetId)).All(p => readySet.Contains(p));
+        var allOnlineReady = state.Players.Where(p => !OfflineTakeoverCore.IsOfflineOrPending(p.NetId)).All(p => readySet.Contains(p));
         if (!allOnlineReady) return;
+
+        if (OfflineTakeoverCore.HasPendingGhost(state.Players.Select(p => p.NetId), out var retryDelayMs))
+        {
+            OfflineTakeoverCore.ScheduleTakeoverRetry(__instance, nameof(SetReadyToBeginEnemyTakeoverPatch), retryDelayMs, () =>
+            {
+                if (!CombatManager.Instance.IsInProgress) return;
+                Postfix(__instance, player);
+            });
+            return;
+        }
         
         foreach (var p in state.Players.Where(p => OfflineTakeoverCore.IsGhost(p.NetId)))
         {
@@ -329,13 +511,22 @@ public static class MapSelectionGhostPatch
         for (var i = 0; i < players.Count; i++)
         {
             if (i >= votesList.Count) break;
-            if (OfflineTakeoverCore.IsGhost(players[i].NetId)) continue;
+            if (OfflineTakeoverCore.IsOfflineOrPending(players[i].NetId)) continue;
 
             if (votesList[i] is not MapVote vote) allOnlineVoted = false;
             else fallbackVote = vote;
         }
         
         if (!allOnlineVoted || !fallbackVote.HasValue) return;
+        if (OfflineTakeoverCore.HasPendingGhost(players.Select(p => p.NetId), out var retryDelayMs))
+        {
+            OfflineTakeoverCore.ScheduleTakeoverRetry(__instance, nameof(MapSelectionGhostPatch), retryDelayMs, () =>
+            {
+                if (!ReferenceEquals(RunManager.Instance.MapSelectionSynchronizer, __instance)) return;
+                Postfix(__instance);
+            });
+            return;
+        }
         
         var needsInvoke = false;
         for (var i = 0; i < votesList.Count; i++)
@@ -378,6 +569,7 @@ public static class TreasureUnblockPatch
         var relicCount = currentRelics.Cast<object>().Count();
         if (relicCount == 0) return;
 
+        var hasPendingGhost = OfflineTakeoverCore.HasPendingGhost(playerCollection.Players.Select(p => p.NetId), out var retryDelayMs);
         var usedIndices = new HashSet<int>();
         
         for (var i = 0; i < playerCollection.Players.Count; i++)
@@ -385,10 +577,20 @@ public static class TreasureUnblockPatch
             if (i >= votesList.Count) break;
             
             var pId = playerCollection.Players[i].NetId;
-            if (OfflineTakeoverCore.IsGhost(pId)) continue;
+            if (OfflineTakeoverCore.IsOfflineOrPending(pId)) continue;
             
             if (!HasVoted(votesList[i], out var vIndex)) return;
             if (vIndex.HasValue) usedIndices.Add(vIndex.Value);
+        }
+
+        if (hasPendingGhost)
+        {
+            OfflineTakeoverCore.ScheduleTakeoverRetry(__instance, nameof(TreasureUnblockPatch), retryDelayMs, () =>
+            {
+                if (!ReferenceEquals(RunManager.Instance.TreasureRoomRelicSynchronizer, __instance)) return;
+                Postfix(__instance, player);
+            });
+            return;
         }
 
         for (var i = 0; i < playerCollection.Players.Count; i++)
@@ -469,8 +671,18 @@ public static class ActChangeGhostPatch
         if (state.Players.All(p => OfflineTakeoverCore.IsGhost(p.NetId))) return;
         if (ReadyPlayersField?.GetValue(__instance) is not IList readyPlayers) return;
 
-        var allOnlineReady = !state.Players.Where((t, i) => !OfflineTakeoverCore.IsGhost(t.NetId) && (i >= readyPlayers.Count || !(bool)readyPlayers[i]!)).Any();
+        var allOnlineReady = !state.Players.Where((t, i) => !OfflineTakeoverCore.IsOfflineOrPending(t.NetId) && (i >= readyPlayers.Count || !(bool)readyPlayers[i]!)).Any();
         if (!allOnlineReady) return;
+
+        if (OfflineTakeoverCore.HasPendingGhost(state.Players.Select(p => p.NetId), out var retryDelayMs))
+        {
+            OfflineTakeoverCore.ScheduleTakeoverRetry(__instance, nameof(ActChangeGhostPatch), retryDelayMs, () =>
+            {
+                if (!ReferenceEquals(RunManager.Instance.ActChangeSynchronizer, __instance)) return;
+                Postfix(__instance, player);
+            });
+            return;
+        }
 
         for (var i = 0; i < state.Players.Count; i++)
         {
@@ -508,6 +720,15 @@ public static class CombatSyncTakeoverPatch
 
         if (runState.Players.All(p => OfflineTakeoverCore.IsGhost(p.NetId))) return;
 
+        if (OfflineTakeoverCore.HasPendingGhost(runState.Players.Select(p => p.NetId), out var retryDelayMs))
+        {
+            OfflineTakeoverCore.ScheduleTakeoverRetry(__instance, nameof(CombatSyncTakeoverPatch), retryDelayMs, () =>
+            {
+                if (!ReferenceEquals(RunManager.Instance.CombatStateSynchronizer, __instance)) return;
+                Postfix(__instance);
+            });
+        }
+
         foreach (var ghostPlayer in runState.Players)
         {
             if (!OfflineTakeoverCore.IsGhost(ghostPlayer.NetId)) continue;
@@ -515,7 +736,10 @@ public static class CombatSyncTakeoverPatch
             var serializedGhost = ghostPlayer.ToSerializable();
             syncData[ghostPlayer.NetId] = serializedGhost;
             var message = new SyncPlayerDataMessage { player = serializedGhost };
-            netService.SendMessage(message);
+            if (!OfflineTakeoverCore.BroadcastGhostMessageToClients(message, ghostPlayer.NetId))
+            {
+                netService.SendMessage(message);
+            }
         }
 
         try
@@ -544,7 +768,15 @@ public static class CombatSyncReceiveTakeoverPatch
         
         var realPlayerId = syncMessage.player.NetId;
         if (realPlayerId == senderId) return true;
-        if (!OfflineTakeoverCore.IsGhost(realPlayerId)) return true;
+
+        var senderIsHost = RunManager.Instance.NetService is NetClientGameService clientService &&
+                           senderId == clientService.HostNetId;
+        if (!OfflineTakeoverCore.IsGhost(realPlayerId))
+        {
+            if (!senderIsHost) return true;
+            OfflineTakeoverCore.MarkPeerDisconnectedImmediate(realPlayerId, NetError.Quit, "host-ghost-sync");
+        }
+
         if (SyncDataField?.GetValue(__instance) is not Dictionary<ulong, SerializablePlayer> syncData) return false;
         
         syncData[realPlayerId] = syncMessage.player;
@@ -564,8 +796,7 @@ public static class CombatSyncReceiveTakeoverPatch
 // ==========================================
 // 事件房间托管
 // ==========================================
-[HarmonyPatch(typeof(EventSynchronizer), "ChooseOptionForEvent")]
-[HarmonyPatch(typeof(EventSynchronizer), "PlayerVotedForSharedOptionIndex")]
+[HarmonyPatch]
 public static class EventUnblockPatch
 {
     private static readonly FieldInfo? PlayerCollectionField = AccessTools.Field(typeof(EventSynchronizer), "_playerCollection");
@@ -578,6 +809,12 @@ public static class EventUnblockPatch
 
     static bool Prepare() => OfflineTakeoverCore.IsTakeoverConfigEnabled();
 
+    static IEnumerable<MethodBase> TargetMethods()
+    {
+        if (ChooseMethod != null) yield return ChooseMethod;
+        if (VoteMethod != null) yield return VoteMethod;
+    }
+
     public static void Postfix(EventSynchronizer __instance)
     {
         if (!OfflineTakeoverCore.IsDirectConnectActive) return;
@@ -585,9 +822,11 @@ public static class EventUnblockPatch
 
         var playerCollection = PlayerCollectionField?.GetValue(__instance) as IPlayerCollection;
         var isShared = IsSharedProperty != null && (bool)IsSharedProperty.GetValue(__instance)!;
+        var runState = RunManager.Instance.DebugOnlyGetState();
 
-        if (playerCollection == null) return;
+        if (playerCollection == null || runState == null) return;
         if (playerCollection.Players.All(p => OfflineTakeoverCore.IsGhost(p.NetId))) return;
+        var hasPendingGhost = OfflineTakeoverCore.HasPendingGhost(playerCollection.Players.Select(p => p.NetId), out var retryDelayMs);
 
         if (isShared)
         {
@@ -600,13 +839,23 @@ public static class EventUnblockPatch
             for (var i = 0; i < playerCollection.Players.Count; i++)
             {
                 if (i >= playerVotes.Count) break;
-                if (OfflineTakeoverCore.IsGhost(playerCollection.Players[i].NetId)) continue;
+                if (OfflineTakeoverCore.IsOfflineOrPending(playerCollection.Players[i].NetId)) continue;
 
                 if (playerVotes[i] is not uint vote) { allOnlineVoted = false; break; }
                 fallbackVote = vote;
             }
 
             if (!allOnlineVoted || !fallbackVote.HasValue) return;
+            if (hasPendingGhost)
+            {
+                OfflineTakeoverCore.ScheduleTakeoverRetry(__instance, nameof(EventUnblockPatch), retryDelayMs, () =>
+                {
+                    if (!ReferenceEquals(RunManager.Instance.EventSynchronizer, __instance)) return;
+                    Postfix(__instance);
+                });
+                return;
+            }
+
             for (var i = 0; i < playerCollection.Players.Count; i++)
             {
                 if (i >= playerVotes.Count) break;
@@ -615,17 +864,34 @@ public static class EventUnblockPatch
                 
                 var pageIndex = (uint)(PageIndexField?.GetValue(__instance) ?? 0U);
                 VoteMethod?.Invoke(__instance, [playerCollection.Players[i], fallbackVote.Value, pageIndex]);
+                OfflineTakeoverCore.BroadcastGhostMessageToClients(new VotedForSharedEventOptionMessage
+                {
+                    optionIndex = fallbackVote.Value,
+                    pageIndex = pageIndex,
+                    location = runState.RunLocation
+                }, playerCollection.Players[i].NetId);
             }
         }
         else
         {
             if (EventsField?.GetValue(__instance) is not List<EventModel> events) return;
 
-            var allOnlineFinished = !playerCollection.Players.Where((t, i) => !OfflineTakeoverCore.IsGhost(t.NetId) && !events[i].IsFinished).Any();
+            var allOnlineFinished = !playerCollection.Players.Where((t, i) => i < events.Count && !OfflineTakeoverCore.IsOfflineOrPending(t.NetId) && !events[i].IsFinished).Any();
             if (!allOnlineFinished) return;
+
+            if (hasPendingGhost)
+            {
+                OfflineTakeoverCore.ScheduleTakeoverRetry(__instance, nameof(EventUnblockPatch), retryDelayMs, () =>
+                {
+                    if (!ReferenceEquals(RunManager.Instance.EventSynchronizer, __instance)) return;
+                    Postfix(__instance);
+                });
+                return;
+            }
             
             for (var i = 0; i < playerCollection.Players.Count; i++)
             {
+                if (i >= events.Count) break;
                 var ghostPlayer = playerCollection.Players[i];
                 if (!OfflineTakeoverCore.IsGhost(ghostPlayer.NetId) || events[i].IsFinished) continue;
                 
@@ -633,6 +899,12 @@ public static class EventUnblockPatch
                 while (events.Count > i && !events[i].IsFinished && events[i].CurrentOptions.Count > 0 && safeGuard < 5)
                 {
                     ChooseMethod?.Invoke(__instance, [ghostPlayer, 0]);
+                    OfflineTakeoverCore.BroadcastGhostMessageToClients(new OptionIndexChosenMessage
+                    {
+                        type = OptionIndexType.Event,
+                        optionIndex = 0,
+                        location = runState.RunLocation
+                    }, ghostPlayer.NetId);
                     safeGuard++;
                 }
             }
@@ -652,7 +924,18 @@ public static class AutoPassRemoteChoiceForGhostsPatch
     {
         if (!OfflineTakeoverCore.IsDirectConnectActive) return;
         if (RunManager.Instance.NetService.Type != NetGameType.Host) return;
-        if (!OfflineTakeoverCore.IsGhost(player.NetId)) return;
+        if (!OfflineTakeoverCore.IsGhost(player.NetId))
+        {
+            if (OfflineTakeoverCore.IsPendingGhost(player.NetId, out var retryDelayMs))
+            {
+                OfflineTakeoverCore.ScheduleTakeoverRetry(__instance, $"{nameof(AutoPassRemoteChoiceForGhostsPatch)}:{player.NetId}:{choiceId}", retryDelayMs, () =>
+                {
+                    Prefix(__instance, player, choiceId);
+                });
+            }
+
+            return;
+        }
 
         var defaultNetResult = PlayerChoiceResult.FromIndex(0).ToNetData();
         __instance.ReceiveReplayChoice(player, choiceId, defaultNetResult);
