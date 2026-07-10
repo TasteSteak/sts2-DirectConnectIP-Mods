@@ -1,10 +1,9 @@
 ### v1.3.3
-* 适配游戏 v0.108 的核心直连流程，更新构建引用到 `lib/sts2.dll`。
-* 修复新版 `JoinFlow`、`IClientConnectionInitializer`、运行中重连和换章投票 API 变更导致的加载/连接失败。
-* 重新接入 v0.108 离线托管：离线玩家会跟随路线选择、宝箱/遗物兜底领取、章节切换投票，并在战斗中继续由游戏自带瓦库 AI 托管。
-* 修复事件房数据不同步：离线玩家的独立事件选择和合作事件投票现在会由房主以离线玩家身份同步给其他在线客户端，避免后续战斗 checksum divergence。
-* 修复读档大厅 `A1 B1 C0` 场景下，房主已进入游戏但在线客机可能黑屏卡在“等待所有玩家”的问题。存档载入时会识别缺席玩家并从运行同步等待列表中剔除，同时立即启用托管。
-* 改进离线判定与延迟重试机制，减少断线、读档、房间切换等瞬态流程里托管触发过早或触发不完整的问题。
+* Updated DirectConnectIP for Slay the Spire 2 v0.108, including the core direct-connect flow, the new `JoinFlow` and `IClientConnectionInitializer` APIs, run reconnection, and act transition vote changes.
+* Restored offline takeover support on v0.108. Offline players now follow route selections, fall back through chest/relic rewards, participate in act transitions, and continue to be handled by the built-in Waku AI during combat.
+* Fixed event-room desynchronization by having the host submit solo event choices and cooperative event votes on behalf of offline players, keeping remaining online clients aligned.
+* Fixed loaded-run lobbies such as `A1 B1 C0`, where the host could enter the run while another online client stayed on the waiting screen. Missing players are now removed from the run sync wait list during save loading and takeover starts immediately.
+* Improved offline-player detection and delayed retry handling to avoid takeover starting too early during disconnects, save loading, and room transitions.
 
 ### v1.3.2
 * 修复全员在线时，丢牌/选择类同步流程可能被离线托管误判为幽灵玩家并提前代答，导致多人数据不同步的问题。
