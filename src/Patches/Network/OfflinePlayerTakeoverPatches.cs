@@ -479,7 +479,7 @@ public static class ActChangeGhostPatch
             var ghostPlayer = state.Players[i];
             if (!OfflineTakeoverCore.IsGhost(ghostPlayer.NetId) || (bool)readyPlayers[i]!) continue;
             
-            OfflineTakeoverCore.EnqueueGhostAction(new VoteToMoveToNextActAction(ghostPlayer), ghostPlayer.NetId);
+            OfflineTakeoverCore.EnqueueGhostAction(new VoteToMoveToNextActAction(ghostPlayer, state.CurrentActIndex), ghostPlayer.NetId);
         }
     }
 }

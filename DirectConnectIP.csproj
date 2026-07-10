@@ -23,7 +23,7 @@
 
     <ItemGroup>
         <Reference Include="sts2">
-            <HintPath>lib\0105\sts2.dll</HintPath>
+            <HintPath>lib\sts2.dll</HintPath>
             <Private>False</Private>
         </Reference>
 

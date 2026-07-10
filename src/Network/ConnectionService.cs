@@ -6,6 +6,7 @@ using DirectConnectIP.Helpers;
 using DirectConnectIP.Patches.Network;
 using Godot;
 using MegaCrit.Sts2.Core.Entities.Multiplayer;
+using MegaCrit.Sts2.Core.Multiplayer;
 using MegaCrit.Sts2.Core.Multiplayer.Connection;
 using MegaCrit.Sts2.Core.Multiplayer.Game;
 using MegaCrit.Sts2.Core.Multiplayer.Messages.Lobby;
@@ -23,7 +24,8 @@ public static class ConnectionService
 {
     public static async Task ConnectAsync(IClientConnectionInitializer initializer)
     {
-        var joinFlow = new JoinFlow();
+        var netClientGameService = new NetClientGameService();
+        var joinFlow = new JoinFlow(netClientGameService, null);
             
         try
         {
@@ -196,7 +198,7 @@ public static class ConnectionService
             };
             var lobby = new LoadRunLobby(netService, new RejoinLoadRunLobbyListener(), loadMessage);
             var runState = RunState.FromSerializable(run);
-            await RunManager.Instance.SetUpSavedMultiPlayer(runState, lobby);
+            await RunManager.Instance.SetUpSavedMultiplayer(runState, lobby);
             await game.LoadRun(runState, run.PreFinishedRoom);
             lobby.CleanUp(disconnectSession: false);
             await game.Transition.FadeIn();

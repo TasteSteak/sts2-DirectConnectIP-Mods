@@ -4,7 +4,7 @@
 
 [**中文**](README_CN.md) | [**Changelog**](Changelog.md)
 
-![Version](https://img.shields.io/badge/Version-1.3.2-blue.svg)
+![Version](https://img.shields.io/badge/Version-1.3.3-blue.svg)
 ![Game](https://img.shields.io/badge/Slay_The_Spire_2-Mod-red.svg)
 ![License](https://img.shields.io/badge/License-CC%20BY--NC%204.0-lightgrey.svg)
 ![Platform](https://img.shields.io/badge/Platform-Windows-blue.svg)
