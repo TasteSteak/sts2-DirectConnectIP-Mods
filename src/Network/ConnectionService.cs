@@ -191,10 +191,15 @@ public static class ConnectionService
             PrepareForRunningSnapshotRejoin(netService);
 
             var run = response.serializableRun;
+            var versionInfo = PeerVersionInfo.LocalDefault();
             var loadMessage = new ClientLoadJoinResponseMessage
             {
                 serializableRun = run,
-                playersAlreadyConnected = run.Players.Select(p => p.NetId).ToList()
+                playersAlreadyConnected = run.Players.Select(p => new LoadRunLobbyPlayer
+                {
+                    id = p.NetId,
+                    versionInfo = versionInfo
+                }).ToList()
             };
             var lobby = new LoadRunLobby(netService, new RejoinLoadRunLobbyListener(), loadMessage);
             var runState = RunState.FromSerializable(run);
@@ -227,7 +232,7 @@ public static class ConnectionService
 
     private sealed class RejoinLoadRunLobbyListener : ILoadRunLobbyListener
     {
-        public void PlayerConnected(ulong playerId) { }
+        public void PlayerConnected(LoadRunLobbyPlayer player) { }
         public void RemotePlayerDisconnected(ulong playerId) { }
         public Task<bool> ShouldAllowRunToBegin() => Task.FromResult(true);
         public void BeginRun() { }

@@ -1,3 +1,8 @@
+### v1.3.5
+* Updated lobby callbacks, reconnection messages and connected-player rosters for the current player-object APIs, preserving loaded-run offline takeover behavior.
+* Preserved timeout and duplicate-ID errors through `JoinFlow` instead of displaying `None`; cancelled connections no longer report success.
+* Compilation, Harmony installation, reconnection/loaded-roster checks and ENet loopback checks pass with v0.110.1. v0.111.0 remains unverified against its own game files.
+
 ### v1.3.3
 * Updated DirectConnectIP for Slay the Spire 2 v0.108, including the core direct-connect flow, the new `JoinFlow` and `IClientConnectionInitializer` APIs, run reconnection, and act transition vote changes.
 * Restored offline takeover support on v0.108. Offline players now follow route selections, fall back through chest/relic rewards, participate in act transitions, and continue to be handled by the built-in Waku AI during combat.

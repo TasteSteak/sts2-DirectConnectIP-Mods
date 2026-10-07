@@ -82,7 +82,7 @@ public static class RunLobbyPeerRejoinedTakeoverStatePatch
 
     public static void Postfix(PlayerRejoinedMessage message)
     {
-        OfflineTakeoverCore.MarkPeerRejoined(message.playerId);
+        OfflineTakeoverCore.MarkPeerRejoined(message.player.id);
     }
 }
 
@@ -104,7 +104,7 @@ public static class LoadRunLobbyPeerRejoinedTakeoverStatePatch
 
     public static void Postfix(PlayerReconnectedMessage message)
     {
-        OfflineTakeoverCore.MarkPeerRejoined(message.playerId);
+        OfflineTakeoverCore.MarkPeerRejoined(message.player.id);
     }
 }
 
@@ -120,7 +120,7 @@ public static class LoadRunLobbyOfflinePlayersBeforeBeginPatch
 
         var missingPlayers = OfflineTakeoverCore.RememberLoadedRunMissingPlayers(
             __instance.Run,
-            __instance.ConnectedPlayerIds,
+            __instance.PlayerIds,
             "host-load-run-begin");
         if (missingPlayers.Count == 0) return;
 
@@ -142,7 +142,7 @@ public static class LoadRunLobbyOfflinePlayersLocalBeginPatch
 
         OfflineTakeoverCore.RememberLoadedRunMissingPlayers(
             __instance.Run,
-            __instance.ConnectedPlayerIds,
+            __instance.PlayerIds,
             "load-run-local-begin");
     }
 }

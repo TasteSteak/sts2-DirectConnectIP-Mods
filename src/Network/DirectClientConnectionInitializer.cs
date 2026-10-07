@@ -24,7 +24,17 @@ namespace DirectConnectIP.Network
 
             var client = new DirectClient(concreteGameService);
             concreteGameService.Initialize(client, PlatformType.None);
-            return await client.ConnectToHost(_netId, ip, port, cancelToken);
+            var error = await client.ConnectToHost(_netId, ip, port, cancelToken);
+            cancelToken.ThrowIfCancellationRequested();
+            if (error.HasValue)
+            {
+                // JoinFlow replaces a returned transport error with ConnectionFailureReason.None.
+                // Throw with the original NetErrorInfo so timeouts and ID collisions reach the popup.
+                throw new ClientConnectionFailedException(
+                    $"Direct connection to {ip}:{port} failed: {error.Value.GetErrorString()}",
+                    error.Value);
+            }
+            return null;
         }
 
         public override string ToString()
