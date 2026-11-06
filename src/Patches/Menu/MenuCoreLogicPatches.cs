@@ -30,7 +30,7 @@ public static class NMultiplayerHostSubmenuPatch
         if (loadingOverlay != null) loadingOverlay.Visible = true;
         try
         {
-            var netService = new NetHostGameService();
+            var netService = new NetHostGameService(PeerVersionInfo.LocalDefault());
             var error = (HostModeSettings.CurrentMode == HostMode.Steam && SteamInitializer.Initialized)
                 ? await netService.StartSteamHost(4)
                 : ServerLauncher.StartDirectHost(netService, 33771);
@@ -61,7 +61,7 @@ public static class LoadGameStartHostAsyncPatch
         if (overlay != null) overlay.Visible = true;
         try
         {
-            var netService = new NetHostGameService();
+            var netService = new NetHostGameService(PeerVersionInfo.LocalDefault());
             var error = HostModeSettings.CurrentMode == HostMode.Steam && SteamInitializer.Initialized
                 ? await netService.StartSteamHost(4)
                 : ServerLauncher.StartDirectHost(netService, 33771);
