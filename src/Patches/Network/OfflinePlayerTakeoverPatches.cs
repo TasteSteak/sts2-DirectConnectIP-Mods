@@ -82,7 +82,7 @@ public static class RunLobbyPeerRejoinedTakeoverStatePatch
 
     public static void Postfix(PlayerRejoinedMessage message)
     {
-        OfflineTakeoverCore.MarkPeerRejoined(message.playerId);
+        OfflineTakeoverCore.MarkPeerRejoined(message.player.id);
     }
 }
 
@@ -104,7 +104,7 @@ public static class LoadRunLobbyPeerRejoinedTakeoverStatePatch
 
     public static void Postfix(PlayerReconnectedMessage message)
     {
-        OfflineTakeoverCore.MarkPeerRejoined(message.playerId);
+        OfflineTakeoverCore.MarkPeerRejoined(message.player.id);
     }
 }
 
@@ -120,7 +120,7 @@ public static class LoadRunLobbyOfflinePlayersBeforeBeginPatch
 
         var missingPlayers = OfflineTakeoverCore.RememberLoadedRunMissingPlayers(
             __instance.Run,
-            __instance.ConnectedPlayerIds,
+            __instance.PlayerIds,
             "host-load-run-begin");
         if (missingPlayers.Count == 0) return;
 
@@ -142,7 +142,7 @@ public static class LoadRunLobbyOfflinePlayersLocalBeginPatch
 
         OfflineTakeoverCore.RememberLoadedRunMissingPlayers(
             __instance.Run,
-            __instance.ConnectedPlayerIds,
+            __instance.PlayerIds,
             "load-run-local-begin");
     }
 }
@@ -370,8 +370,6 @@ public static class ConcurrentAutoPlayTurnPatch
 [HarmonyPatch(typeof(ActionQueueSynchronizer), nameof(ActionQueueSynchronizer.SetCombatState))]
 public static class AutoReadyEnemyTurnPatch
 {
-    private static readonly FieldInfo? ReadyPlayersField = AccessTools.Field(typeof(CombatManager), "_playersReadyToBeginEnemyTurn");
-
     static bool Prepare() => OfflineTakeoverCore.IsTakeoverConfigEnabled();
 
     public static void Postfix(ActionQueueSynchronizer __instance, ActionSynchronizerCombatState combatState)
@@ -384,7 +382,7 @@ public static class AutoReadyEnemyTurnPatch
         var state = CombatManager.Instance.DebugOnlyGetState();
         if (state == null) return;
 
-        var readySet = ReadyPlayersField?.GetValue(CombatManager.Instance) as HashSet<Player>;
+        var readySet = OfflineTakeoverCore.GetPlayersReadyToBeginEnemyTurn(CombatManager.Instance);
         if (OfflineTakeoverCore.HasPendingGhost(state.Players.Select(p => p.NetId), out var retryDelayMs))
         {
             OfflineTakeoverCore.ScheduleTakeoverRetry(__instance, nameof(AutoReadyEnemyTurnPatch), retryDelayMs, () =>
@@ -447,8 +445,6 @@ public static class CombatTurnEndTakeoverPatch
 [HarmonyPatch(typeof(CombatManager), nameof(CombatManager.SetReadyToBeginEnemyTurn))]
 public static class SetReadyToBeginEnemyTakeoverPatch
 {
-    private static readonly FieldInfo? ReadyPlayersField = AccessTools.Field(typeof(CombatManager), "_playersReadyToBeginEnemyTurn");
-
     static bool Prepare() => OfflineTakeoverCore.IsTakeoverConfigEnabled();
 
     public static void Postfix(CombatManager __instance, Player player)
@@ -456,7 +452,7 @@ public static class SetReadyToBeginEnemyTakeoverPatch
         if (!OfflineTakeoverCore.IsDirectConnectActive) return;
         if (RunManager.Instance.NetService.Type != NetGameType.Host) return;
 
-        if (ReadyPlayersField?.GetValue(__instance) is not HashSet<Player> readySet) return;
+        if (OfflineTakeoverCore.GetPlayersReadyToBeginEnemyTurn(__instance) is not { } readySet) return;
             
         var state = __instance.DebugOnlyGetState();
         if (state == null) return;
