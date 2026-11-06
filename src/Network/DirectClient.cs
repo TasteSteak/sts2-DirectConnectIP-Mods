@@ -59,7 +59,7 @@ namespace DirectConnectIP.Network
                 catch (OperationCanceledException)
                 {
                     DisconnectFromHost(NetError.CancelledJoin);
-                    return null;
+                    throw;
                 }
 
                 timeout += EnetTransportSettings.PollIntervalMs;
@@ -115,7 +115,7 @@ namespace DirectConnectIP.Network
                 catch (OperationCanceledException)
                 {
                     DisconnectFromHost(NetError.CancelledJoin);
-                    return (null, null);
+                    throw;
                 }
 
                 if (_connection == null) return (null, new NetErrorInfo(NetError.UnknownNetworkError, false));

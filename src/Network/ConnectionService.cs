@@ -24,8 +24,8 @@ public static class ConnectionService
 {
     public static async Task ConnectAsync(IClientConnectionInitializer initializer)
     {
-        var netClientGameService = new NetClientGameService();
-        var joinFlow = new JoinFlow(netClientGameService, null);
+        var netClientGameService = new NetClientGameService(PeerVersionInfo.LocalDefault());
+        var joinFlow = new JoinFlow(netClientGameService);
             
         try
         {
@@ -194,7 +194,10 @@ public static class ConnectionService
             var loadMessage = new ClientLoadJoinResponseMessage
             {
                 serializableRun = run,
-                playersAlreadyConnected = run.Players.Select(p => p.NetId).ToList()
+                playersAlreadyConnected = run.Players.Select(p => new LoadRunLobbyPlayer
+                {
+                    id = p.NetId
+                }).ToList()
             };
             var lobby = new LoadRunLobby(netService, new RejoinLoadRunLobbyListener(), loadMessage);
             var runState = RunState.FromSerializable(run);
@@ -227,7 +230,7 @@ public static class ConnectionService
 
     private sealed class RejoinLoadRunLobbyListener : ILoadRunLobbyListener
     {
-        public void PlayerConnected(ulong playerId) { }
+        public void PlayerConnected(LoadRunLobbyPlayer player) { }
         public void RemotePlayerDisconnected(ulong playerId) { }
         public Task<bool> ShouldAllowRunToBegin() => Task.FromResult(true);
         public void BeginRun() { }

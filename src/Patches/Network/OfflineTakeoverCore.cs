@@ -17,6 +17,7 @@ using MegaCrit.Sts2.Core.Multiplayer.Game.Lobby;
 using MegaCrit.Sts2.Core.Runs;
 using MegaCrit.Sts2.Core.Saves;
 using MegaCrit.Sts2.Core.Context;
+using MegaCrit.Sts2.Core.Entities.Players;
 using MegaCrit.Sts2.Core.GameActions.Multiplayer;
 
 namespace DirectConnectIP.Patches.Network;
@@ -25,7 +26,18 @@ public static class OfflineTakeoverCore
 {
     private static readonly MethodInfo EnqueueActionMethod = AccessTools.Method(typeof(ActionQueueSynchronizer), "EnqueueAction");
     private static readonly MethodInfo HostBroadcastMessageMethod = AccessTools.Method(typeof(NetHostGameService), "BroadcastMessage");
-    private static readonly FieldInfo RunLobbyConnectedIdsField = AccessTools.Field(typeof(RunLobby), "_connectedPlayerIds");
+    private static readonly FieldInfo CombatTurnStateField = AccessTools.Field(typeof(CombatManager), "_turnState");
+    private static PropertyInfo PlayersReadyToBeginEnemyTurnProperty;
+
+    public static HashSet<Player> GetPlayersReadyToBeginEnemyTurn(CombatManager combatManager)
+    {
+        var turnState = CombatTurnStateField?.GetValue(combatManager);
+        if (turnState == null) return null;
+
+        PlayersReadyToBeginEnemyTurnProperty ??= AccessTools.Property(turnState.GetType(), "PlayersReadyToBeginEnemyTurn");
+        return PlayersReadyToBeginEnemyTurnProperty?.GetValue(turnState) as HashSet<Player>;
+    }
+
     private const ulong OfflineTakeoverDelayMs = 8_000;
     private static readonly Dictionary<ulong, OfflinePeerState> OfflinePeers = [];
     private static readonly object OfflinePeersLock = new();
@@ -159,7 +171,7 @@ public static class OfflineTakeoverCore
         }
         else if (netService.Type == NetGameType.Client && RunManager.Instance.RunLobby is RunLobby runLobby)
         {
-            foreach (var id in runLobby.ConnectedPlayerIds)
+            foreach (var id in runLobby.PlayerIds)
             {
                 ids.Add(id);
             }
@@ -337,17 +349,11 @@ public static class OfflineTakeoverCore
         if (offlineIds.Count == 0) return;
 
         var runPlayerIds = state.Players.Select(p => p.NetId).ToHashSet();
-        if (RunLobbyConnectedIdsField?.GetValue(runLobby) is not HashSet<ulong> connectedIds)
-        {
-            Log.Warn("[DirectConnectIP] 找不到 RunLobby 连接玩家集合，无法剔除存档离线玩家。");
-            return;
-        }
-
         foreach (var netId in offlineIds)
         {
             if (!runPlayerIds.Contains(netId)) continue;
 
-            if (connectedIds.Remove(netId))
+            if (runLobby.Players.RemoveAll(player => player.id == netId) > 0)
             {
                 Log.Warn($"[DirectConnectIP] 存档载入时将离线玩家 {netId} 从运行大厅连接列表移除。");
             }
@@ -548,7 +554,7 @@ public static class OfflineTakeoverCore
                 ids.Add(clientService.HostNetId);
                 if (RunManager.Instance.RunLobby is RunLobby runLobby)
                 {
-                    foreach (var id in runLobby.ConnectedPlayerIds)
+                    foreach (var id in runLobby.PlayerIds)
                     {
                         ids.Add(id);
                     }
